@@ -181,11 +181,18 @@ async def startup():
     if ollama_client:
         try:
             logger.info("Checking if embedding model exists...")
-            models = ollama_client.list()['models']
-            model_names = [model['name'] for model in models]
+            response = ollama_client.list()
+            models = response.get('models', [])
+            model_names = [model.get('name', model.get('model', 'unknown')) for model in models]
             logger.info(f"Available models: {model_names}")
             
-            if not any(EMBEDDING_MODEL in model['name'] for model in models):
+            # Check if our embedding model exists (with or without :latest tag)
+            model_found = any(
+                EMBEDDING_MODEL in name or f"{EMBEDDING_MODEL}:latest" in name 
+                for name in model_names
+            )
+            
+            if not model_found:
                 logger.info(f"📥 Pulling embedding model: {EMBEDDING_MODEL}")
                 ollama_client.pull(EMBEDDING_MODEL)
                 logger.info(f"✅ Successfully pulled {EMBEDDING_MODEL}")
@@ -193,6 +200,8 @@ async def startup():
                 logger.info(f"✅ Model {EMBEDDING_MODEL} already available")
         except Exception as e:
             logger.error(f"❌ Error with Ollama model setup: {e}")
+            import traceback
+            logger.error(f"Full traceback: {traceback.format_exc()}")
     else:
         logger.warning("⚠️ Ollama client not available, skipping model check")
     
