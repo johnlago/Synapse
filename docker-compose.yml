@@ -14,6 +14,11 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '0.5'
 
   processor:
     build: 
@@ -28,10 +33,17 @@ services:
       - OLLAMA_HOST=host.docker.internal:11434
       - CHROMA_HOST=chroma:8000
       - EMBEDDING_MODEL=mxbai-embed-large
+      - BATCH_SIZE=10
+      - OLLAMA_RETRIES=3
     ports:
       - "8001:8001"
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
 
   mcp-server:
     build:
@@ -51,6 +63,33 @@ services:
       - "host.docker.internal:host-gateway"
     stdin_open: true
     tty: true
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '0.5'
+
+  chat-interface:
+    build:
+      context: ./chat-interface
+      dockerfile: Dockerfile
+    depends_on:
+      - processor
+    volumes:
+      - ./chat-interface:/app
+    environment:
+      - OLLAMA_HOST=host.docker.internal:11434
+      - PROCESSOR_HOST=processor:8001
+      - CHAT_MODEL=llama3.1:8b
+    ports:
+      - "8003:8003"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '0.5'
 
 volumes:
   chroma_data:

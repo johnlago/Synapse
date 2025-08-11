@@ -30,12 +30,16 @@ OLLAMA_HOST = os.getenv("OLLAMA_HOST", "host.docker.internal:11434")
 CHROMA_HOST = os.getenv("CHROMA_HOST", "chroma:8000")
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "mxbai-embed-large")
 DOCUMENTS_PATH = "/app/documents"
+BATCH_SIZE = int(os.getenv("BATCH_SIZE", "10"))
+OLLAMA_RETRIES = int(os.getenv("OLLAMA_RETRIES", "3"))
 
 logger.info(f"Configuration loaded:")
 logger.info(f"  OLLAMA_HOST: {OLLAMA_HOST}")
 logger.info(f"  CHROMA_HOST: {CHROMA_HOST}")
 logger.info(f"  EMBEDDING_MODEL: {EMBEDDING_MODEL}")
 logger.info(f"  DOCUMENTS_PATH: {DOCUMENTS_PATH}")
+logger.info(f"  BATCH_SIZE: {BATCH_SIZE}")
+logger.info(f"  OLLAMA_RETRIES: {OLLAMA_RETRIES}")
 
 # Initialize clients
 logger.info("Initializing Chroma client...")
@@ -47,6 +51,10 @@ except Exception as e:
     chroma_client = None
 
 collection = None
+
+# Simple lock to prevent concurrent processing of same file
+processing_files = set()
+processing_lock = asyncio.Lock()
 
 class ProcessRequest(BaseModel):
     file_path: str
@@ -78,20 +86,24 @@ class FileWatcher(FileSystemEventHandler):
             self._schedule_processing(event.src_path, "modified")
 
 async def get_embeddings(text: str) -> List[float]:
-    """Get embeddings from Ollama"""
-    try:
-        # Configure Ollama client with custom host
-        import ollama
-        client = ollama.Client(host=f"http://{OLLAMA_HOST}")
-        
-        response = client.embeddings(
-            model=EMBEDDING_MODEL,
-            prompt=text
-        )
-        return response['embedding']
-    except Exception as e:
-        logger.error(f"Error getting embeddings from {OLLAMA_HOST}: {e}")
-        raise
+    """Get embeddings from Ollama with retry logic"""
+    import ollama
+    client = ollama.Client(host=f"http://{OLLAMA_HOST}")
+    
+    for attempt in range(OLLAMA_RETRIES):
+        try:
+            response = client.embeddings(
+                model=EMBEDDING_MODEL,
+                prompt=text
+            )
+            return response['embedding']
+        except Exception as e:
+            if attempt == OLLAMA_RETRIES - 1:  # Last attempt
+                logger.error(f"Error getting embeddings from {OLLAMA_HOST} after {OLLAMA_RETRIES} attempts: {e}")
+                raise
+            else:
+                logger.warning(f"Embedding attempt {attempt + 1} failed, retrying: {e}")
+                await asyncio.sleep(2)  # Simple 2-second delay
 
 def chunk_document(file_path: str) -> List[Dict[str, Any]]:
     """Process and chunk a document using unstructured"""
@@ -130,12 +142,21 @@ def chunk_document(file_path: str) -> List[Dict[str, Any]]:
 async def process_document(file_path: str, force_reprocess: bool = False):
     """Process a single document and add to vector database"""
     try:
-        # Check if already processed (unless force reprocess)
-        if not force_reprocess:
-            existing = collection.get(where={"source": file_path})
-            if existing['ids']:
-                logger.info(f"Document {file_path} already processed, skipping")
+        # Prevent concurrent processing of the same file
+        async with processing_lock:
+            if file_path in processing_files:
+                logger.info(f"Document {file_path} already being processed, skipping")
                 return
+            
+            # Check if already processed (unless force reprocess)
+            if not force_reprocess:
+                existing = collection.get(where={"source": file_path})
+                if existing['ids']:
+                    logger.info(f"Document {file_path} already processed, skipping")
+                    return
+            
+            # Mark as being processed
+            processing_files.add(file_path)
         
         logger.info(f"Processing document: {file_path}")
         
@@ -151,8 +172,11 @@ async def process_document(file_path: str, force_reprocess: bool = False):
             embedding = await get_embeddings(chunk["text"])
             embeddings.append(embedding)
         
-        # Add to Chroma
-        ids = [f"{Path(file_path).stem}_{chunk['metadata']['chunk_id']}" for chunk in chunks]
+        # Add to Chroma - use relative path from documents root to avoid collisions
+        relative_path = os.path.relpath(file_path, DOCUMENTS_PATH)
+        # Replace path separators with underscores for valid ID
+        safe_path = relative_path.replace(os.sep, '_').replace('.', '_')
+        ids = [f"{safe_path}_{chunk['metadata']['chunk_id']}" for chunk in chunks]
         texts = [chunk["text"] for chunk in chunks]
         metadatas = [chunk["metadata"] for chunk in chunks]
         
@@ -167,6 +191,9 @@ async def process_document(file_path: str, force_reprocess: bool = False):
         
     except Exception as e:
         logger.error(f"Error processing document {file_path}: {e}")
+    finally:
+        # Always remove from processing set
+        processing_files.discard(file_path)
 
 @app.on_event("startup")
 async def startup():
@@ -174,12 +201,13 @@ async def startup():
     
     logger.info("=== STARTUP SEQUENCE BEGINNING ===")
     
-    # Wait for Ollama to be ready and pull model
+    # Wait for Ollama to be ready and pull model - FAIL FAST
     logger.info("Waiting for Ollama to be ready...")
     ollama_attempts = 0
     ollama_client = None
+    max_ollama_attempts = 12  # 1 minute timeout
     
-    while True:
+    while ollama_attempts < max_ollama_attempts:
         try:
             logger.info(f"Attempting to connect to Ollama at {OLLAMA_HOST} (attempt {ollama_attempts + 1})")
             ollama_client = ollama.Client(host=f"http://{OLLAMA_HOST}")
@@ -189,10 +217,16 @@ async def startup():
         except Exception as e:
             ollama_attempts += 1
             logger.warning(f"❌ Ollama connection failed (attempt {ollama_attempts}): {e}")
-            if ollama_attempts >= 12:  # 1 minute timeout
-                logger.error("❌ Failed to connect to Ollama after 1 minute, continuing anyway...")
-                break
+            if ollama_attempts >= max_ollama_attempts:
+                logger.error("🚨 CRITICAL: Failed to connect to Ollama after 1 minute!")
+                logger.error("🚨 Check if Ollama is running and accessible at: " + OLLAMA_HOST)
+                logger.error("🚨 Container will exit now - this is intentional!")
+                exit(1)
             await asyncio.sleep(5)
+    
+    if ollama_client is None:
+        logger.error("🚨 CRITICAL: Ollama client is None - this should not happen!")
+        exit(1)
     
     # Pull embedding model if not exists
     if ollama_client:
@@ -222,12 +256,14 @@ async def startup():
     else:
         logger.warning("⚠️ Ollama client not available, skipping model check")
     
-    # Initialize Chroma collection
+    # Initialize Chroma collection - FAIL FAST
     try:
         logger.info("Connecting to Chroma database...")
         if chroma_client is None:
-            logger.error("❌ Chroma client is None, cannot create collection")
-            return
+            logger.error("🚨 CRITICAL: Chroma client is None!")
+            logger.error("🚨 Check if ChromaDB is running and accessible at: " + CHROMA_HOST)
+            logger.error("🚨 Container will exit now - this is intentional!")
+            exit(1)
             
         # Get or create collection with cosine similarity
         try:
@@ -242,8 +278,10 @@ async def startup():
             logger.info("✅ Created new collection")
         logger.info("✅ Connected to Chroma collection successfully")
     except Exception as e:
-        logger.error(f"❌ Error connecting to Chroma: {e}")
-        collection = None
+        logger.error(f"🚨 CRITICAL: Error connecting to Chroma: {e}")
+        logger.error("🚨 Check if ChromaDB is running and accessible at: " + CHROMA_HOST)
+        logger.error("🚨 Container will exit now - this is intentional!")
+        exit(1)
     
     # Start file watcher
     try:
@@ -270,18 +308,43 @@ async def process_file(request: ProcessRequest, background_tasks: BackgroundTask
     background_tasks.add_task(process_document, file_path, request.force_reprocess)
     return {"message": f"Processing {request.file_path}"}
 
+async def process_batch(file_paths: List[str], batch_num: int):
+    """Process a batch of files"""
+    logger.info(f"Processing batch {batch_num} with {len(file_paths)} files")
+    for file_path in file_paths:
+        try:
+            await process_document(file_path)
+        except Exception as e:
+            logger.error(f"Failed to process {file_path} in batch {batch_num}: {e}")
+    logger.info(f"Completed batch {batch_num}")
+
 @app.post("/process-all")
 async def process_all_documents(background_tasks: BackgroundTasks):
-    """Process all documents in the documents folder"""
-    processed = 0
+    """Process all documents in the documents folder in batches"""
+    # Collect all files first
+    all_files = []
     for root, dirs, files in os.walk(DOCUMENTS_PATH):
         for file in files:
             if file.endswith(('.md', '.pdf', '.txt', '.docx')):
                 file_path = os.path.join(root, file)
-                background_tasks.add_task(process_document, file_path)
-                processed += 1
+                all_files.append(file_path)
     
-    return {"message": f"Processing {processed} documents"}
+    # Process in batches
+    total_files = len(all_files)
+    total_batches = (total_files + BATCH_SIZE - 1) // BATCH_SIZE  # Ceiling division
+    
+    logger.info(f"Found {total_files} files, processing in {total_batches} batches of {BATCH_SIZE}")
+    
+    for i in range(0, total_files, BATCH_SIZE):
+        batch = all_files[i:i + BATCH_SIZE]
+        batch_num = (i // BATCH_SIZE) + 1
+        background_tasks.add_task(process_batch, batch, batch_num)
+    
+    return {
+        "message": f"Processing {total_files} documents in {total_batches} batches",
+        "batch_size": BATCH_SIZE,
+        "total_batches": total_batches
+    }
 
 class SearchRequest(BaseModel):
     query: str

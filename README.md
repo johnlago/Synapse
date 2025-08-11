@@ -84,6 +84,17 @@ Environment variables:
 - `EMBEDDING_MODEL`: Ollama embedding model (default: mxbai-embed-large)
 - `CHROMA_HOST`: Chroma database host
 - `OLLAMA_HOST`: Ollama service host
+- `BATCH_SIZE`: Number of files to process in each batch (default: 10)
+- `OLLAMA_RETRIES`: Number of retry attempts for Ollama requests (default: 3)
+
+## Resource Limits
+
+Docker containers have the following resource limits:
+- **ChromaDB**: 1GB RAM, 1 CPU cores
+- **Processor**: 2GB RAM, 1 CPU core  
+- **MCP Server**: 1GB RAM, 1 CPU cores
+
+Adjust these according to your preference
 
 ## File Watching
 
