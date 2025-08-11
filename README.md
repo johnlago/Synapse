@@ -1,6 +1,9 @@
-# Local RAG Database
+# Local LLM RAG Chat + MCP
 
-A containerized RAG (Retrieval-Augmented Generation) system using Chroma, Ollama, and Unstructured for local document processing and querying via MCP (Model Context Protocol).
+A containerized RAG (Retrieval-Augmented Generation) system using Chroma, Ollama, and Unstructured for local notes/documents processing and querying via MCP (Model Context Protocol) or a dedicated UI.
+
+- Uses Ollama for full local ingestion + RAG datababase.
+- Also provides an MCP server to be added to tools like Claude
 
 ## Architecture
 
@@ -51,7 +54,13 @@ Note: It is best to run Ollama natively rather than on a container -- Makes thin
    curl http://localhost:8001/reset
    ```
 
+## The Chat UI using Local LLM
+
+Access it at localhost:8003
+
 ## MCP Integration with Claude Code
+
+> Note: This is not local anymore -- Claude can now read your notes. Proceed with caution
 
 ```bash
 claude mcp add local-rag -- docker exec -i local-rag-db-mcp-server-1 python /app/server_fastmcp.py
