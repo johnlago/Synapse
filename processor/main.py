@@ -213,9 +213,16 @@ async def startup():
             logger.error("❌ Chroma client is None, cannot create collection")
             return
             
-        collection = chroma_client.get_or_create_collection(
+        # Try to delete existing collection and recreate with cosine similarity
+        try:
+            chroma_client.delete_collection("documents")
+            logger.info("Deleted existing collection")
+        except:
+            logger.info("No existing collection to delete")
+            
+        collection = chroma_client.create_collection(
             name="documents",
-            metadata={"description": "Local RAG document collection", "hnsw:space": "cosine"}
+            metadata={"hnsw:space": "cosine"}
         )
         logger.info("✅ Connected to Chroma collection successfully")
     except Exception as e:
@@ -296,8 +303,13 @@ async def search_documents(request: SearchRequest):
             results['metadatas'][0],
             results['distances'][0]
         )):
+            # Debug: Log raw distance values
+            logger.info(f"Raw distance: {distance}, type: {type(distance)}")
+            
             # With cosine similarity, distance is 1 - cosine_similarity, so similarity = 1 - distance
             similarity = max(0, 1 - distance)  # Convert cosine distance to similarity [0,1]
+            logger.info(f"Calculated similarity: {similarity}")
+            
             formatted_results.append({
                 "content": doc,
                 "similarity": round(similarity, 3),
