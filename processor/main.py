@@ -14,19 +14,37 @@ from watchdog.events import FileSystemEventHandler
 import logging
 
 # Setup logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
+
+logger.info("Starting Local RAG Processor...")
 
 app = FastAPI(title="Local RAG Processor")
 
 # Configuration
-OLLAMA_HOST = os.getenv("OLLAMA_HOST", "localhost:11434")
-CHROMA_HOST = os.getenv("CHROMA_HOST", "localhost:8000")
+OLLAMA_HOST = os.getenv("OLLAMA_HOST", "host.docker.internal:11434")
+CHROMA_HOST = os.getenv("CHROMA_HOST", "chroma:8000")
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "mxbai-embed-large")
 DOCUMENTS_PATH = "/app/documents"
 
+logger.info(f"Configuration loaded:")
+logger.info(f"  OLLAMA_HOST: {OLLAMA_HOST}")
+logger.info(f"  CHROMA_HOST: {CHROMA_HOST}")
+logger.info(f"  EMBEDDING_MODEL: {EMBEDDING_MODEL}")
+logger.info(f"  DOCUMENTS_PATH: {DOCUMENTS_PATH}")
+
 # Initialize clients
-chroma_client = chromadb.HttpClient(host=CHROMA_HOST.split(':')[0], port=int(CHROMA_HOST.split(':')[1]))
+logger.info("Initializing Chroma client...")
+try:
+    chroma_client = chromadb.HttpClient(host=CHROMA_HOST.split(':')[0], port=int(CHROMA_HOST.split(':')[1]))
+    logger.info("Chroma client initialized successfully")
+except Exception as e:
+    logger.error(f"Failed to initialize Chroma client: {e}")
+    chroma_client = None
+
 collection = None
 
 class ProcessRequest(BaseModel):
@@ -45,13 +63,17 @@ class FileWatcher(FileSystemEventHandler):
 async def get_embeddings(text: str) -> List[float]:
     """Get embeddings from Ollama"""
     try:
-        response = ollama.embeddings(
+        # Configure Ollama client with custom host
+        import ollama
+        client = ollama.Client(host=f"http://{OLLAMA_HOST}")
+        
+        response = client.embeddings(
             model=EMBEDDING_MODEL,
             prompt=text
         )
         return response['embedding']
     except Exception as e:
-        logger.error(f"Error getting embeddings: {e}")
+        logger.error(f"Error getting embeddings from {OLLAMA_HOST}: {e}")
         raise
 
 def chunk_document(file_path: str) -> List[Dict[str, Any]]:
@@ -133,40 +155,76 @@ async def process_document(file_path: str, force_reprocess: bool = False):
 async def startup():
     global collection
     
+    logger.info("=== STARTUP SEQUENCE BEGINNING ===")
+    
     # Wait for Ollama to be ready and pull model
-    logger.info("Waiting for Ollama...")
+    logger.info("Waiting for Ollama to be ready...")
+    ollama_attempts = 0
+    ollama_client = None
+    
     while True:
         try:
-            ollama.list()
+            logger.info(f"Attempting to connect to Ollama at {OLLAMA_HOST} (attempt {ollama_attempts + 1})")
+            ollama_client = ollama.Client(host=f"http://{OLLAMA_HOST}")
+            ollama_client.list()
+            logger.info("✅ Ollama connection successful!")
             break
-        except:
+        except Exception as e:
+            ollama_attempts += 1
+            logger.warning(f"❌ Ollama connection failed (attempt {ollama_attempts}): {e}")
+            if ollama_attempts >= 12:  # 1 minute timeout
+                logger.error("❌ Failed to connect to Ollama after 1 minute, continuing anyway...")
+                break
             await asyncio.sleep(5)
     
     # Pull embedding model if not exists
-    try:
-        models = ollama.list()['models']
-        if not any(EMBEDDING_MODEL in model['name'] for model in models):
-            logger.info(f"Pulling embedding model: {EMBEDDING_MODEL}")
-            ollama.pull(EMBEDDING_MODEL)
-    except Exception as e:
-        logger.error(f"Error with Ollama setup: {e}")
+    if ollama_client:
+        try:
+            logger.info("Checking if embedding model exists...")
+            models = ollama_client.list()['models']
+            model_names = [model['name'] for model in models]
+            logger.info(f"Available models: {model_names}")
+            
+            if not any(EMBEDDING_MODEL in model['name'] for model in models):
+                logger.info(f"📥 Pulling embedding model: {EMBEDDING_MODEL}")
+                ollama_client.pull(EMBEDDING_MODEL)
+                logger.info(f"✅ Successfully pulled {EMBEDDING_MODEL}")
+            else:
+                logger.info(f"✅ Model {EMBEDDING_MODEL} already available")
+        except Exception as e:
+            logger.error(f"❌ Error with Ollama model setup: {e}")
+    else:
+        logger.warning("⚠️ Ollama client not available, skipping model check")
     
     # Initialize Chroma collection
     try:
+        logger.info("Connecting to Chroma database...")
+        if chroma_client is None:
+            logger.error("❌ Chroma client is None, cannot create collection")
+            return
+            
         collection = chroma_client.get_or_create_collection(
             name="documents",
             metadata={"description": "Local RAG document collection"}
         )
-        logger.info("Connected to Chroma collection")
+        logger.info("✅ Connected to Chroma collection successfully")
     except Exception as e:
-        logger.error(f"Error connecting to Chroma: {e}")
+        logger.error(f"❌ Error connecting to Chroma: {e}")
+        collection = None
     
     # Start file watcher
-    event_handler = FileWatcher(process_document)
-    observer = Observer()
-    observer.schedule(event_handler, DOCUMENTS_PATH, recursive=True)
-    observer.start()
-    logger.info(f"Started watching {DOCUMENTS_PATH}")
+    try:
+        logger.info(f"Starting file watcher for {DOCUMENTS_PATH}...")
+        event_handler = FileWatcher(process_document)
+        observer = Observer()
+        observer.schedule(event_handler, DOCUMENTS_PATH, recursive=True)
+        observer.start()
+        logger.info(f"✅ File watcher started for {DOCUMENTS_PATH}")
+    except Exception as e:
+        logger.error(f"❌ Error starting file watcher: {e}")
+    
+    logger.info("=== STARTUP SEQUENCE COMPLETE ===")
+    logger.info("🚀 Local RAG Processor is ready!")
 
 @app.post("/process")
 async def process_file(request: ProcessRequest, background_tasks: BackgroundTasks):
@@ -206,5 +264,10 @@ async def get_status():
         return {"status": "error", "error": str(e)}
 
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    try:
+        logger.info("🔥 Starting uvicorn server...")
+        import uvicorn
+        uvicorn.run(app, host="0.0.0.0", port=8001, log_level="info")
+    except Exception as e:
+        logger.error(f"❌ Failed to start uvicorn server: {e}")
+        raise
