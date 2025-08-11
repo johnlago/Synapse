@@ -327,6 +327,37 @@ async def search_documents(request: SearchRequest):
         logger.error(f"Search error: {e}")
         return {"error": str(e)}
 
+@app.post("/reset")
+async def reset_database():
+    """Reset the ChromaDB by deleting and recreating the collection"""
+    global collection
+    try:
+        if chroma_client is None:
+            return {"error": "Chroma client not available"}
+        
+        # Delete existing collection
+        try:
+            chroma_client.delete_collection("documents")
+            logger.info("✅ Deleted existing collection")
+        except Exception as e:
+            logger.warning(f"Could not delete collection (may not exist): {e}")
+        
+        # Recreate collection
+        collection = chroma_client.create_collection(
+            name="documents",
+            metadata={"hnsw:space": "cosine"}
+        )
+        logger.info("✅ Created new collection")
+        
+        return {
+            "status": "success",
+            "message": "Database reset successfully",
+            "documents_indexed": 0
+        }
+    except Exception as e:
+        logger.error(f"Error resetting database: {e}")
+        return {"error": str(e)}
+
 @app.get("/status")
 async def get_status():
     """Get system status"""

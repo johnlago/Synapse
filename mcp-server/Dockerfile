@@ -9,4 +9,4 @@ COPY . .
 
 EXPOSE 8002
 
-CMD ["python", "server.py"]
+CMD ["python", "server_fastmcp.py"]
