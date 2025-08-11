@@ -30,7 +30,7 @@ app = FastAPI(title="Local RAG Processor")
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "host.docker.internal:11434")
 CHROMA_HOST = os.getenv("CHROMA_HOST", "chroma:8000")
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "mxbai-embed-large")
-DOCUMENTS_PATH = "/app/documents"
+DOCUMENTS_PATH = os.getenv("DOCUMENTS_PATH", "/app/documents")
 BATCH_SIZE = int(os.getenv("BATCH_SIZE", "10"))
 OLLAMA_RETRIES = int(os.getenv("OLLAMA_RETRIES", "3"))
 

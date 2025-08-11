@@ -29,15 +29,18 @@ Note: It is best to run Ollama natively rather than on a container -- Makes thin
    ollama pull mxbai-embed-large
    ```
 
-2. **Start the Docker services:**
+2. **Configure document path (optional):**
    ```bash
-   docker-compose up -d
+   # Copy the example environment file
+   cp .env.example .env
+   
+   # Edit .env to point to your documents directory
+   # Example: DOCUMENTS_PATH=/Users/username/Documents/Notes
    ```
 
-3. **Add documents:**
+3. **Start the Docker services:**
    ```bash
-   # Copy your documents to the documents folder
-   cp /path/to/your/notes/*.md ./documents/
+   docker-compose up -d
    ```
 
 4. **Process documents:**
@@ -122,8 +125,10 @@ Update the path in the second method to match your actual project location.
 
 ## Configuration
 
-Environment variables:
+Environment variables (configure via `.env` file):
+- `DOCUMENTS_PATH`: Absolute path to your documents directory (default: ./documents)
 - `EMBEDDING_MODEL`: Ollama embedding model (default: mxbai-embed-large)
+- `CHAT_MODEL`: Ollama chat model for the interface (default: llama3.1:8b)
 - `CHROMA_HOST`: Chroma database host
 - `OLLAMA_HOST`: Ollama service host
 - `BATCH_SIZE`: Number of files to process in each batch (default: 10)

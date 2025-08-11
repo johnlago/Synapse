@@ -27,12 +27,13 @@ services:
     depends_on:
       - chroma
     volumes:
-      - ./documents:/app/documents:ro
+      - ${DOCUMENTS_PATH:-./documents}:/app/documents:ro
       - ./processor:/app
     environment:
       - OLLAMA_HOST=host.docker.internal:11434
       - CHROMA_HOST=chroma:8000
       - EMBEDDING_MODEL=mxbai-embed-large
+      - DOCUMENTS_PATH=/app/documents
       - BATCH_SIZE=10
       - OLLAMA_RETRIES=3
     ports:
