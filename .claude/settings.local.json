@@ -6,7 +6,8 @@
       "WebFetch(domain:pypi.org)",
       "mcp__local-rag__search_documents",
       "mcp__local-rag__get_document_info",
-      "WebFetch(domain:github.com)"
+      "WebFetch(domain:github.com)",
+      "Bash(curl:*)"
     ],
     "deny": []
   }

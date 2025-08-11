@@ -4,9 +4,10 @@ import json
 import logging
 import asyncio
 from typing import List, Dict, Any, AsyncGenerator
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
 import httpx
 
 # Setup logging
@@ -14,6 +15,12 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("chat-interface")
 
 app = FastAPI(title="Local RAG Chat Interface")
+
+# Mount static files
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# Setup templates
+templates = Jinja2Templates(directory="templates")
 
 # Configuration
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "host.docker.internal:11434")
@@ -142,7 +149,7 @@ async def chat_with_ollama(message: str) -> AsyncGenerator[str, None]:
             # Check if we should use tools based on keywords
             should_search = any(keyword in message.lower() for keyword in [
                 'search', 'find', 'notes', 'documents', 'wrote', 'about', 
-                'project', 'redis', 'megaphone', 'cms', 'status', 'what',
+                'project', 'status', 'what',
                 'show', 'tell', 'explain', 'how', 'when', 'where'
             ])
             
@@ -271,277 +278,52 @@ async def websocket_chat(websocket: WebSocket):
         await websocket.close()
 
 @app.get("/")
-async def get_chat_ui():
+async def get_chat_ui(request: Request):
     """Serve the chat interface"""
-    return HTMLResponse(content="""
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Local RAG Chat</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
-            background: #f5f5f5;
-            height: 100vh;
-            display: flex;
-            flex-direction: column;
-        }
-        
-        .header {
-            background: #2c3e50;
-            color: white;
-            padding: 1rem;
-            text-align: center;
-        }
-        
-        .chat-container {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            max-width: 800px;
-            margin: 0 auto;
-            width: 100%;
-            background: white;
-            box-shadow: 0 0 10px rgba(0,0,0,0.1);
-        }
-        
-        .messages {
-            flex: 1;
-            overflow-y: auto;
-            padding: 1rem;
-            display: flex;
-            flex-direction: column;
-            gap: 1rem;
-        }
-        
-        .message {
-            max-width: 80%;
-            padding: 0.75rem 1rem;
-            border-radius: 1rem;
-            word-wrap: break-word;
-        }
-        
-        .user-message {
-            background: #007bff;
-            color: white;
-            align-self: flex-end;
-        }
-        
-        .assistant-message {
-            background: #e9ecef;
-            color: #333;
-            align-self: flex-start;
-            white-space: pre-wrap;
-        }
-        
-        .input-container {
-            display: flex;
-            padding: 1rem;
-            gap: 0.5rem;
-            border-top: 1px solid #dee2e6;
-        }
-        
-        .input-field {
-            flex: 1;
-            padding: 0.75rem;
-            border: 1px solid #dee2e6;
-            border-radius: 0.5rem;
-            font-size: 1rem;
-        }
-        
-        .send-button {
-            padding: 0.75rem 1.5rem;
-            background: #007bff;
-            color: white;
-            border: none;
-            border-radius: 0.5rem;
-            cursor: pointer;
-            font-size: 1rem;
-        }
-        
-        .send-button:hover {
-            background: #0056b3;
-        }
-        
-        .send-button:disabled {
-            background: #6c757d;
-            cursor: not-allowed;
-        }
-        
-        .typing-indicator {
-            background: #e9ecef;
-            color: #666;
-            padding: 0.75rem 1rem;
-            border-radius: 1rem;
-            align-self: flex-start;
-            font-style: italic;
-        }
-        
-        .status {
-            position: fixed;
-            top: 1rem;
-            right: 1rem;
-            padding: 0.5rem 1rem;
-            border-radius: 0.5rem;
-            font-size: 0.875rem;
-        }
-        
-        .status.connected {
-            background: #d4edda;
-            color: #155724;
-        }
-        
-        .status.disconnected {
-            background: #f8d7da;
-            color: #721c24;
-        }
-    </style>
-</head>
-<body>
-    <div class="header">
-        <h1>🧠 Local RAG Chat</h1>
-        <p>Ask questions about your notes and documents</p>
-    </div>
-    
-    <div class="status disconnected" id="status">Connecting...</div>
-    
-    <div class="chat-container">
-        <div class="messages" id="messages">
-            <div class="message assistant-message">
-                Hello! I can help you search through your personal notes and documents. Ask me anything about your projects, ideas, or any topic you've written about.
-            </div>
-        </div>
-        
-        <div class="input-container">
-            <input type="text" 
-                   class="input-field" 
-                   id="messageInput" 
-                   placeholder="Ask about your notes..."
-                   autocomplete="off">
-            <button class="send-button" id="sendButton">Send</button>
-        </div>
-    </div>
+    return templates.TemplateResponse("index.html", {"request": request})
 
-    <script>
-        class ChatClient {
-            constructor() {
-                this.socket = null;
-                this.messageInput = document.getElementById('messageInput');
-                this.sendButton = document.getElementById('sendButton');
-                this.messages = document.getElementById('messages');
-                this.status = document.getElementById('status');
-                this.currentResponse = null;
-                
-                this.connect();
-                this.setupEventListeners();
-            }
+@app.get("/api/status")
+async def get_detailed_status():
+    """Get detailed system status"""
+    try:
+        async with httpx.AsyncClient() as client:
+            # Get processor status
+            processor_response = await client.get(f"http://{PROCESSOR_HOST}/status")
+            processor_data = processor_response.json() if processor_response.status_code == 200 else {}
             
-            connect() {
-                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-                const wsUrl = `${protocol}//${window.location.host}/ws/chat`;
-                
-                this.socket = new WebSocket(wsUrl);
-                
-                this.socket.onopen = () => {
-                    this.status.textContent = 'Connected';
-                    this.status.className = 'status connected';
-                };
-                
-                this.socket.onclose = () => {
-                    this.status.textContent = 'Disconnected';
-                    this.status.className = 'status disconnected';
-                    setTimeout(() => this.connect(), 3000);
-                };
-                
-                this.socket.onmessage = (event) => {
-                    const data = JSON.parse(event.data);
-                    this.handleMessage(data);
-                };
-                
-                this.socket.onerror = (error) => {
-                    console.error('WebSocket error:', error);
-                };
-            }
+            # Test Ollama connection
+            try:
+                ollama_response = await client.get(f"http://{OLLAMA_HOST}/api/tags")
+                ollama_status = "connected" if ollama_response.status_code == 200 else "disconnected"
+                ollama_models = ollama_response.json().get("models", []) if ollama_response.status_code == 200 else []
+            except:
+                ollama_status = "disconnected"
+                ollama_models = []
             
-            setupEventListeners() {
-                this.sendButton.addEventListener('click', () => this.sendMessage());
-                this.messageInput.addEventListener('keypress', (e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault();
-                        this.sendMessage();
-                    }
-                });
-            }
-            
-            sendMessage() {
-                const message = this.messageInput.value.trim();
-                if (!message || this.socket.readyState !== WebSocket.OPEN) return;
-                
-                // Add user message to chat
-                this.addMessage(message, 'user');
-                
-                // Clear input and disable
-                this.messageInput.value = '';
-                this.sendButton.disabled = true;
-                
-                // Show typing indicator
-                this.currentResponse = this.addMessage('Thinking...', 'assistant');
-                this.currentResponse.classList.add('typing-indicator');
-                
-                // Send to server
-                this.socket.send(JSON.stringify({ message }));
-            }
-            
-            handleMessage(data) {
-                if (data.type === 'chunk') {
-                    if (this.currentResponse && this.currentResponse.classList.contains('typing-indicator')) {
-                        this.currentResponse.textContent = '';
-                        this.currentResponse.classList.remove('typing-indicator');
-                    }
-                    
-                    if (this.currentResponse) {
-                        this.currentResponse.textContent += data.content;
-                        this.scrollToBottom();
-                    }
-                } else if (data.type === 'end') {
-                    this.currentResponse = null;
-                    this.sendButton.disabled = false;
-                    this.messageInput.focus();
+            return {
+                "service": "chat-interface",
+                "status": "healthy",
+                "processor": {
+                    "status": "connected" if processor_response.status_code == 200 else "disconnected",
+                    "documents_indexed": processor_data.get("documents_indexed", 0),
+                    "embedding_model": processor_data.get("embedding_model", "Unknown"),
+                    "total_chunks": processor_data.get("total_chunks", 0),
+                    "collection_name": processor_data.get("collection_name", "Unknown")
+                },
+                "ollama": {
+                    "status": ollama_status,
+                    "host": OLLAMA_HOST,
+                    "chat_model": CHAT_MODEL,
+                    "available_models": [model.get("name", "") for model in ollama_models]
                 }
             }
-            
-            addMessage(content, sender) {
-                const messageDiv = document.createElement('div');
-                messageDiv.className = `message ${sender}-message`;
-                messageDiv.textContent = content;
-                
-                this.messages.appendChild(messageDiv);
-                this.scrollToBottom();
-                
-                return messageDiv;
-            }
-            
-            scrollToBottom() {
-                this.messages.scrollTop = this.messages.scrollHeight;
-            }
+    except Exception as e:
+        logger.error(f"Error getting status: {e}")
+        return {
+            "service": "chat-interface", 
+            "status": "error",
+            "error": str(e)
         }
-        
-        // Initialize chat when page loads
-        document.addEventListener('DOMContentLoaded', () => {
-            new ChatClient();
-        });
-    </script>
-</body>
-</html>
-    """)
 
 @app.get("/health")
 async def health_check():

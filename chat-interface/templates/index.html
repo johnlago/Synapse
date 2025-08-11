@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Local RAG Chat</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <!-- Marked.js for markdown rendering -->
+    <script src="https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js"></script>
+    <!-- DOMPurify for XSS protection -->
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
+</head>
+<body>
+    <div class="header">
+        <h1>🧠 Local RAG Chat</h1>
+        <p>Ask questions about your notes and documents</p>
+    </div>
+    
+    <div class="status disconnected" id="status">Connecting...</div>
+    
+    <div class="status-dashboard" id="statusDashboard">
+        <div class="status-header">
+            <h3>📊 System Status</h3>
+            <button class="toggle-btn" id="toggleStatus">▼</button>
+        </div>
+        <div class="status-content" id="statusContent">
+            <div class="status-loading">Loading system status...</div>
+        </div>
+    </div>
+    
+    <div class="chat-container">
+        <div class="messages" id="messages">
+            <div class="message assistant-message">
+                Hello! I can help you search through your personal notes and documents. Ask me anything about your projects, ideas, or any topic you've written about.
+            </div>
+        </div>
+        
+        <div class="input-container">
+            <input type="text" 
+                   class="input-field" 
+                   id="messageInput" 
+                   placeholder="Ask about your notes..."
+                   autocomplete="off">
+            <button class="send-button" id="sendButton">Send</button>
+        </div>
+    </div>
+
+    <script src="/static/js/chat.js"></script>
+</body>
+</html>
