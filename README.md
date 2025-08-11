@@ -47,22 +47,15 @@ A containerized RAG (Retrieval-Augmented Generation) system using Chroma, Ollama
 
 ## MCP Integration
 
-Add to your Claude Code MCP settings:
+```bash
+# Method 1: Direct command
+claude mcp add local-rag -- docker exec -i local-rag-db-mcp-server-1 python /app/server.py
 
-```json
-{
-  "mcpServers": {
-    "local-rag": {
-      "command": "python",
-      "args": ["/path/to/Local-RAG-DB/mcp-server/server.py"],
-      "env": {
-        "CHROMA_HOST": "localhost:8000",
-        "OLLAMA_HOST": "localhost:11434"
-      }
-    }
-  }
-}
+# Method 2: Using the script
+claude mcp add local-rag /path/to/Local-RAG-DB/mcp-client.sh
 ```
+
+Update the path in the second method to match your actual project location.
 
 ## API Endpoints
 

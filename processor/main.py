@@ -215,7 +215,7 @@ async def startup():
             
         collection = chroma_client.get_or_create_collection(
             name="documents",
-            metadata={"description": "Local RAG document collection"}
+            metadata={"description": "Local RAG document collection", "hnsw:space": "cosine"}
         )
         logger.info("✅ Connected to Chroma collection successfully")
     except Exception as e:
@@ -279,7 +279,7 @@ async def search_documents(request: SearchRequest):
         # Get query embedding
         query_embedding = await get_embeddings(query)
         
-        # Search in Chroma
+        # Search in Chroma using cosine similarity
         results = collection.query(
             query_embeddings=[query_embedding],
             n_results=limit,
@@ -296,7 +296,8 @@ async def search_documents(request: SearchRequest):
             results['metadatas'][0],
             results['distances'][0]
         )):
-            similarity = 1 - distance
+            # With cosine similarity, distance is 1 - cosine_similarity, so similarity = 1 - distance
+            similarity = max(0, 1 - distance)  # Convert cosine distance to similarity [0,1]
             formatted_results.append({
                 "content": doc,
                 "similarity": round(similarity, 3),

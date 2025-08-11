@@ -46,7 +46,7 @@ async def list_tools() -> List[Tool]:
                     "min_similarity": {
                         "type": "number",
                         "description": "Minimum similarity score (0.0 to 1.0)",
-                        "default": 0.3
+                        "default": 0.001
                     }
                 },
                 "required": ["query"]
@@ -114,7 +114,10 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
                 host=CHROMA_HOST.split(':')[0], 
                 port=int(CHROMA_HOST.split(':')[1])
             )
-            collection = chroma_client.get_collection("documents")
+            collection = chroma_client.get_or_create_collection(
+                "documents",
+                metadata={"description": "Local RAG document collection", "hnsw:space": "cosine"}
+            )
         except Exception as e:
             return [TextContent(
                 type="text",
@@ -125,7 +128,7 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
         try:
             query = arguments["query"]
             limit = arguments.get("limit", 5)
-            min_similarity = arguments.get("min_similarity", 0.3)
+            min_similarity = arguments.get("min_similarity", 0.001)
             
             # Get query embedding
             query_embedding = await get_embeddings(query)
@@ -150,7 +153,8 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
                 results['metadatas'][0], 
                 results['distances'][0]
             )):
-                similarity = 1 - distance  # Convert distance to similarity
+                # With cosine similarity, distance is 1 - cosine_similarity, so similarity = 1 - distance  
+                similarity = max(0, 1 - distance)  # Convert cosine distance to similarity [0,1]
                 if similarity >= min_similarity:
                     formatted_results.append(
                         f"**Result {i+1}** (similarity: {similarity:.3f})\n"
@@ -252,7 +256,8 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
                 results['metadatas'][0][:limit],
                 results['distances'][0][:limit]
             )):
-                similarity = 1 - distance
+                # With cosine similarity, distance is 1 - cosine_similarity, so similarity = 1 - distance  
+                similarity = max(0, 1 - distance)  # Convert cosine distance to similarity [0,1]
                 formatted_results.append(
                     f"**Result {i+1}** (similarity: {similarity:.3f})\n"
                     f"**Source:** {metadata.get('file_name', 'Unknown')}\n" 
@@ -278,12 +283,20 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
         )]
 
 async def main():
-    """Run the MCP server"""
+    """Run the MCP server using stdio"""
     logger.info("Starting Local RAG MCP Server")
     
-    # Run the server
-    async with stdio_server() as (read_stream, write_stream):
-        await app.run(read_stream, write_stream, app.create_initialization_options())
+    # Keep the container alive and wait for stdin
+    try:
+        # Run the server using stdio
+        async with stdio_server() as (read_stream, write_stream):
+            await app.run(read_stream, write_stream, app.create_initialization_options())
+    except Exception as e:
+        logger.error(f"MCP server error: {e}")
+        # Keep container running for debugging
+        while True:
+            await asyncio.sleep(60)
+            logger.info("MCP server container still running...")
 
 if __name__ == "__main__":
     asyncio.run(main())

@@ -49,6 +49,8 @@ services:
       - "8002:8002"
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    stdin_open: true
+    tty: true
 
 volumes:
   chroma_data:
