@@ -7,7 +7,6 @@ from typing import List, Dict, Any, AsyncGenerator
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
-import ollama
 import httpx
 
 # Setup logging
@@ -136,74 +135,92 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> str:
         return f"Unknown tool: {name}"
 
 async def chat_with_ollama(message: str) -> AsyncGenerator[str, None]:
-    """Stream chat response from Ollama with tool calling"""
+    """Stream chat response from Ollama with tool calling using HTTP API"""
     try:
-        client = ollama.AsyncClient(host=f"http://{OLLAMA_HOST}")
-        
-        messages = [
-            {
-                "role": "system",
-                "content": """You are a helpful assistant that can search through the user's personal notes and documents. 
-
-When the user asks questions about their notes, projects, or any topic that might be in their documents, use the search_documents tool to find relevant information.
-
-Always provide helpful, conversational responses based on the search results. If you find relevant information, summarize it naturally and mention the sources.
-
-You can also check the status of the document collection if asked about what's available or indexed."""
-            },
-            {
-                "role": "user", 
-                "content": message
-            }
-        ]
-        
-        # First call to get potential tool calls
-        response = await client.chat(
-            model=CHAT_MODEL,
-            messages=messages,
-            tools=TOOLS,
-            stream=False
-        )
-        
-        # Check if there are tool calls
-        if response['message'].get('tool_calls'):
-            # Execute tool calls
-            for tool_call in response['message']['tool_calls']:
-                function = tool_call['function']
-                tool_result = await call_tool(function['name'], function['arguments'])
-                
-                # Add tool result to conversation
-                messages.append(response['message'])
-                messages.append({
-                    "role": "tool",
-                    "content": tool_result
-                })
+        async with httpx.AsyncClient() as client:
             
-            # Get final response with tool results
-            final_response = client.chat(
-                model=CHAT_MODEL,
-                messages=messages,
-                stream=True
-            )
+            # Check if we should use tools based on keywords
+            should_search = any(keyword in message.lower() for keyword in [
+                'search', 'find', 'notes', 'documents', 'wrote', 'about', 
+                'project', 'redis', 'megaphone', 'cms', 'status', 'what',
+                'show', 'tell', 'explain', 'how', 'when', 'where'
+            ])
             
-            async for chunk in final_response:
-                if chunk['message']['content']:
-                    yield chunk['message']['content']
-        else:
-            # No tools needed, stream the response
-            response_stream = client.chat(
-                model=CHAT_MODEL,
-                messages=messages,
-                stream=True
-            )
-            
-            async for chunk in response_stream:
-                if chunk['message']['content']:
-                    yield chunk['message']['content']
+            if should_search and not any(greeting in message.lower() for greeting in ['hi', 'hello', 'hey', 'thanks', 'thank you']):
+                # Try to search documents first
+                try:
+                    search_result = await tool_caller.search_documents(message, limit=3)
                     
+                    # Create context-aware prompt
+                    context_prompt = f"""Based on the user's question: "{message}"
+
+I found this information in their notes:
+{search_result}
+
+Please provide a helpful, conversational response that:
+1. Directly answers their question using the information found
+2. Mentions the relevant sources 
+3. Is natural and friendly
+4. If no relevant info was found, let them know and offer to help with other questions
+
+User question: {message}"""
+                    
+                    # Stream response with context
+                    payload = {
+                        "model": CHAT_MODEL,
+                        "prompt": context_prompt,
+                        "stream": True
+                    }
+                    
+                    async with client.stream('POST', f"http://{OLLAMA_HOST}/api/generate", json=payload) as response:
+                        response.raise_for_status()
+                        async for line in response.aiter_lines():
+                            if line:
+                                try:
+                                    data = json.loads(line)
+                                    if 'response' in data and data['response']:
+                                        yield data['response']
+                                except json.JSONDecodeError:
+                                    continue
+                                    
+                except Exception as search_error:
+                    logger.error(f"Search failed: {search_error}")
+                    # Fallback to normal chat
+                    async for chunk in stream_normal_response(client, message):
+                        yield chunk
+            else:
+                # Normal chat without tools
+                async for chunk in stream_normal_response(client, message):
+                    yield chunk
+                
     except Exception as e:
         logger.error(f"Error in chat: {e}")
-        yield f"Error: {str(e)}"
+        yield f"Sorry, I encountered an error: {str(e)}"
+
+async def stream_normal_response(client: httpx.AsyncClient, message: str):
+    """Stream a normal chat response without tools"""
+    system_context = """You are a helpful assistant for a personal note-taking system. 
+    
+You can help users search through their notes and documents. When they ask about specific topics, projects, or information, let them know you can search their documents.
+
+For general conversation, respond naturally and helpfully."""
+    
+    payload = {
+        "model": CHAT_MODEL,
+        "prompt": f"System: {system_context}\n\nUser: {message}\n\nAssistant:",
+        "stream": True
+    }
+    
+    async with client.stream('POST', f"http://{OLLAMA_HOST}/api/generate", json=payload) as response:
+        response.raise_for_status()
+        async for line in response.aiter_lines():
+            if line:
+                try:
+                    data = json.loads(line)
+                    if 'response' in data and data['response']:
+                        yield data['response']
+                except json.JSONDecodeError:
+                    continue
 
 @app.websocket("/ws/chat")
 async def websocket_chat(websocket: WebSocket):
