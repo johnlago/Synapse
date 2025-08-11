@@ -53,18 +53,29 @@ class ProcessRequest(BaseModel):
     force_reprocess: bool = False
 
 class FileWatcher(FileSystemEventHandler):
-    def __init__(self, processor_func):
+    def __init__(self, processor_func, loop):
         self.processor_func = processor_func
+        self.loop = loop
+        
+    def _schedule_processing(self, file_path, event_type):
+        """Schedule async processing from thread"""
+        try:
+            asyncio.run_coroutine_threadsafe(
+                self.processor_func(file_path), 
+                self.loop
+            )
+        except Exception as e:
+            logger.error(f"Error scheduling processing for {file_path}: {e}")
         
     def on_created(self, event):
         if not event.is_directory and event.src_path.endswith(('.md', '.pdf', '.txt', '.docx')):
             logger.info(f"File created: {event.src_path}")
-            asyncio.create_task(self.processor_func(event.src_path))
+            self._schedule_processing(event.src_path, "created")
         
     def on_modified(self, event):
         if not event.is_directory and event.src_path.endswith(('.md', '.pdf', '.txt', '.docx')):
             logger.info(f"File modified: {event.src_path}")
-            asyncio.create_task(self.processor_func(event.src_path))
+            self._schedule_processing(event.src_path, "modified")
 
 async def get_embeddings(text: str) -> List[float]:
     """Get embeddings from Ollama"""
@@ -237,7 +248,8 @@ async def startup():
     # Start file watcher
     try:
         logger.info(f"Starting file watcher for {DOCUMENTS_PATH}...")
-        event_handler = FileWatcher(process_document)
+        loop = asyncio.get_running_loop()
+        event_handler = FileWatcher(process_document, loop)
         observer = Observer()
         observer.schedule(event_handler, DOCUMENTS_PATH, recursive=True)
         observer.start()
