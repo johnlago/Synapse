@@ -151,17 +151,29 @@ async def chat_with_ollama(message: str) -> AsyncGenerator[str, None]:
                 try:
                     search_result = await tool_caller.search_documents(message, limit=3)
                     
-                    # Create context-aware prompt
-                    context_prompt = f"""Based on the user's question: "{message}"
+                    # Create context-aware prompt with better formatting
+                    context_prompt = f"""You are helping a user search through their personal notes. Based on their question: "{message}"
 
-I found this information in their notes:
+Here's what I found in their documents:
 {search_result}
 
-Please provide a helpful, conversational response that:
-1. Directly answers their question using the information found
-2. Mentions the relevant sources 
-3. Is natural and friendly
-4. If no relevant info was found, let them know and offer to help with other questions
+Please format your response with this structure:
+
+## Answer
+[Provide a clear, direct answer to their question using the information found]
+
+## References
+[List the source documents with brief descriptions of relevant content, using 📄 emoji for each source]
+
+## Additional Context
+[Any extra relevant information or context that might be helpful, but keep this brief]
+
+Guidelines:
+- Give the direct answer first before anything else
+- If no relevant information was found, simply say so in the Answer section
+- Keep references clean and organized
+- Be conversational but well-structured
+- Use markdown formatting for better readability
 
 User question: {message}"""
                     

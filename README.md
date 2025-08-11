@@ -54,9 +54,28 @@ Note: It is best to run Ollama natively rather than on a container -- Makes thin
    curl http://localhost:8001/reset
    ```
 
-## The Chat UI using Local LLM
+## Chat Interface with Local LLM
 
-Access it at localhost:8003
+A web-based chat interface that uses your local Ollama installation to answer questions about your documents.
+
+**Access:** http://localhost:8003
+
+**Features:**
+- **Smart Document Search**: Automatically searches your notes when you ask questions about topics, projects, or specific information
+- **Conversational Interface**: Natural language responses with context from your documents  
+- **Real-time Streaming**: Live response streaming for smooth conversation flow
+- **Stateless Sessions**: Each message is independent - no conversation history carried between messages
+- **Fallback Handling**: Gracefully handles greetings and general chat without unnecessary document searches
+
+**Example Usage:**
+- "What did I write about Redis performance?" → Searches documents and provides contextual response 
+- "hi" → Normal greeting response without document search
+- "What's the status of my collection?" → Shows document indexing information
+
+**Requirements:**
+- Ollama running locally with a chat model (default: `llama3.1:8b`)
+- Processor service running for document search API
+- Documents already indexed in ChromaDB
 
 ## MCP Integration with Claude Code
 
@@ -68,12 +87,26 @@ claude mcp add local-rag -- docker exec -i local-rag-db-mcp-server-1 python /app
 
 Update the path in the second method to match your actual project location.
 
+## Services & Ports
+
+- **ChromaDB**: Port 8000 - Vector database
+- **Processor**: Port 8001 - Document processing and search API  
+- **MCP Server**: Port 8002 - Model Context Protocol server
+- **Chat Interface**: Port 8003 - Web-based chat UI
+
 ## API Endpoints
 
 ### Processor Service (Port 8001)
 - `POST /process` - Process a specific file
 - `POST /process-all` - Process all documents
+- `POST /search` - Search documents (used by chat interface)
 - `GET /status` - System status
+- `POST /reset` - Reset/clear the document collection
+
+### Chat Interface (Port 8003)
+- `GET /` - Web chat interface
+- `WebSocket /ws/chat` - Real-time chat communication
+- `GET /health` - Service health check
 
 ### MCP Tools
 - `search_documents` - Semantic search across all documents
@@ -99,9 +132,10 @@ Environment variables:
 ## Resource Limits
 
 Docker containers have the following resource limits:
-- **ChromaDB**: 1GB RAM, 1 CPU cores
+- **ChromaDB**: 1GB RAM, 0.5 CPU cores
 - **Processor**: 2GB RAM, 1 CPU core  
-- **MCP Server**: 1GB RAM, 1 CPU cores
+- **MCP Server**: 1GB RAM, 0.5 CPU cores
+- **Chat Interface**: 1GB RAM, 0.5 CPU cores
 
 Adjust these according to your preference
 
