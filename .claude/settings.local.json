@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir:*)",
+      "WebFetch(domain:ollama.com)",
+      "WebFetch(domain:pypi.org)"
+    ],
+    "deny": []
+  }
+}
