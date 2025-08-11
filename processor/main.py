@@ -56,6 +56,11 @@ class FileWatcher(FileSystemEventHandler):
     def __init__(self, processor_func):
         self.processor_func = processor_func
         
+    def on_created(self, event):
+        if not event.is_directory and event.src_path.endswith(('.md', '.pdf', '.txt', '.docx')):
+            logger.info(f"File created: {event.src_path}")
+            asyncio.create_task(self.processor_func(event.src_path))
+        
     def on_modified(self, event):
         if not event.is_directory and event.src_path.endswith(('.md', '.pdf', '.txt', '.docx')):
             logger.info(f"File modified: {event.src_path}")
