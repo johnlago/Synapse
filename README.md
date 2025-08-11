@@ -4,7 +4,7 @@ A containerized RAG (Retrieval-Augmented Generation) system using Chroma, Ollama
 
 ## Architecture
 
-- **Ollama**: Local embedding model (Qwen2.5-Embedding-4B)
+- **Ollama**: Local embedding model (mxbai-embed-large)
 - **Chroma**: Vector database for document storage
 - **Unstructured**: Document processing and chunking
 - **MCP Server**: Claude Code integration for RAG queries
@@ -13,12 +13,14 @@ A containerized RAG (Retrieval-Augmented Generation) system using Chroma, Ollama
 ## Quick Start
 
 1. **Install and start Ollama locally:**
+
+
+Note: It is best to run Ollama natively rather than on a container -- Makes things easier to use GPU
+
    ```bash
    # Install Ollama (if not installed)
    curl -fsSL https://ollama.ai/install.sh | sh
    
-   # Start Ollama service
-   ollama serve
    
    # Pull the embedding model
    ollama pull mxbai-embed-large
@@ -44,15 +46,15 @@ A containerized RAG (Retrieval-Augmented Generation) system using Chroma, Ollama
    ```bash
    curl http://localhost:8001/status
    ```
+6. **Reset Everything --  delete the collection in chroma**
+   ```bash
+   curl http://localhost:8001/reset
+   ```
 
-## MCP Integration
+## MCP Integration with Claude Code
 
 ```bash
-# Method 1: Direct command
-claude mcp add local-rag -- docker exec -i local-rag-db-mcp-server-1 python /app/server.py
-
-# Method 2: Using the script
-claude mcp add local-rag /path/to/Local-RAG-DB/mcp-client.sh
+claude mcp add local-rag -- docker exec -i local-rag-db-mcp-server-1 python /app/server_fastmcp.py
 ```
 
 Update the path in the second method to match your actual project location.
@@ -79,7 +81,7 @@ Update the path in the second method to match your actual project location.
 ## Configuration
 
 Environment variables:
-- `EMBEDDING_MODEL`: Ollama embedding model (default: qwen2.5-embedding:4b)
+- `EMBEDDING_MODEL`: Ollama embedding model (default: mxbai-embed-large)
 - `CHROMA_HOST`: Chroma database host
 - `OLLAMA_HOST`: Ollama service host
 
