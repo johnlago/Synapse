@@ -1,6 +1,7 @@
 import os
 import time
 import asyncio
+import hashlib
 from pathlib import Path
 from typing import List, Dict, Any
 from fastapi import FastAPI, BackgroundTasks
@@ -85,6 +86,19 @@ class FileWatcher(FileSystemEventHandler):
             logger.info(f"File modified: {event.src_path}")
             self._schedule_processing(event.src_path, "modified")
 
+def calculate_file_hash(file_path: str) -> str:
+    """Calculate SHA256 hash of file content"""
+    try:
+        with open(file_path, 'rb') as f:
+            file_hash = hashlib.sha256()
+            # Read in chunks to handle large files
+            for chunk in iter(lambda: f.read(4096), b""):
+                file_hash.update(chunk)
+            return file_hash.hexdigest()
+    except Exception as e:
+        logger.error(f"Error calculating hash for {file_path}: {e}")
+        return ""
+
 async def get_embeddings(text: str) -> List[float]:
     """Get embeddings from Ollama with retry logic"""
     import ollama
@@ -108,6 +122,9 @@ async def get_embeddings(text: str) -> List[float]:
 def chunk_document(file_path: str) -> List[Dict[str, Any]]:
     """Process and chunk a document using unstructured"""
     try:
+        # Calculate file hash for content change detection
+        file_hash = calculate_file_hash(file_path)
+        
         # Partition the document
         elements = partition(filename=file_path)
         
@@ -129,6 +146,7 @@ def chunk_document(file_path: str) -> List[Dict[str, Any]]:
                     "chunk_id": i,
                     "element_type": getattr(chunk, 'category', 'text'),
                     "file_name": Path(file_path).name,
+                    "file_hash": file_hash,
                     "processed_at": time.time()
                 }
             })
@@ -148,12 +166,27 @@ async def process_document(file_path: str, force_reprocess: bool = False):
                 logger.info(f"Document {file_path} already being processed, skipping")
                 return
             
-            # Check if already processed (unless force reprocess)
+            # Check if file needs processing (content-based)
             if not force_reprocess:
-                existing = collection.get(where={"source": file_path})
-                if existing['ids']:
-                    logger.info(f"Document {file_path} already processed, skipping")
+                # Calculate current file hash
+                current_hash = calculate_file_hash(file_path)
+                if not current_hash:
+                    logger.error(f"Could not calculate hash for {file_path}, skipping")
                     return
+                
+                # Check existing chunks
+                existing = collection.get(where={"source": file_path})
+                if existing['ids'] and existing['metadatas']:
+                    # Get the hash from the first chunk's metadata
+                    stored_hash = existing['metadatas'][0].get('file_hash', '')
+                    if stored_hash == current_hash:
+                        logger.info(f"Document {file_path} unchanged (hash: {current_hash[:8]}...), skipping")
+                        return
+                    else:
+                        logger.info(f"Document {file_path} content changed (old: {stored_hash[:8]}..., new: {current_hash[:8]}...), reprocessing")
+                        # Delete existing chunks for this file
+                        collection.delete(where={"source": file_path})
+                        logger.info(f"Deleted {len(existing['ids'])} old chunks for {file_path}")
             
             # Mark as being processed
             processing_files.add(file_path)
