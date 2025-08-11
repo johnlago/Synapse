@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import List, Dict, Any
 from fastapi import FastAPI, BackgroundTasks
 from pydantic import BaseModel
+from typing import Dict
 import chromadb
 import ollama
 from unstructured.partition.auto import partition
@@ -257,6 +258,61 @@ async def process_all_documents(background_tasks: BackgroundTasks):
                 processed += 1
     
     return {"message": f"Processing {processed} documents"}
+
+class SearchRequest(BaseModel):
+    query: str
+    limit: int = 5
+
+@app.post("/search")
+async def search_documents(request: SearchRequest):
+    """Search documents using semantic similarity"""
+    try:
+        query = request.query
+        limit = request.limit
+        
+        if not query:
+            return {"error": "Query is required"}
+        
+        if not collection:
+            return {"error": "No collection available"}
+        
+        # Get query embedding
+        query_embedding = await get_embeddings(query)
+        
+        # Search in Chroma
+        results = collection.query(
+            query_embeddings=[query_embedding],
+            n_results=limit,
+            include=["documents", "metadatas", "distances"]
+        )
+        
+        if not results['documents'][0]:
+            return {"results": [], "message": "No documents found"}
+        
+        # Format results
+        formatted_results = []
+        for i, (doc, metadata, distance) in enumerate(zip(
+            results['documents'][0],
+            results['metadatas'][0],
+            results['distances'][0]
+        )):
+            similarity = 1 - distance
+            formatted_results.append({
+                "content": doc,
+                "similarity": round(similarity, 3),
+                "source": metadata.get('file_name', 'Unknown'),
+                "chunk_id": metadata.get('chunk_id', i)
+            })
+        
+        return {
+            "query": query,
+            "results": formatted_results,
+            "total_found": len(formatted_results)
+        }
+        
+    except Exception as e:
+        logger.error(f"Search error: {e}")
+        return {"error": str(e)}
 
 @app.get("/status")
 async def get_status():
