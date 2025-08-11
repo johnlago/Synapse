@@ -16,16 +16,10 @@
         <p>Ask questions about your notes and documents</p>
     </div>
     
-    <div class="status disconnected" id="status">Connecting...</div>
-    
-    <div class="status-dashboard" id="statusDashboard">
-        <div class="status-header">
-            <h3>📊 System Status</h3>
-            <button class="toggle-btn" id="toggleStatus">▼</button>
-        </div>
-        <div class="status-content" id="statusContent">
-            <div class="status-loading">Loading system status...</div>
-        </div>
+    <div class="status-bar">
+        <div class="status disconnected" id="status">Connecting...</div>
+        <div class="status-badge" id="modelStatus">Model: Loading...</div>
+        <div class="status-badge" id="docStatus">Docs: Loading...</div>
     </div>
     
     <div class="chat-container">

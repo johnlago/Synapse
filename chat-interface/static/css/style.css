@@ -177,13 +177,20 @@ body {
     font-style: italic;
 }
 
-.status {
+.status-bar {
     position: fixed;
     top: 1rem;
     right: 1rem;
+    display: flex;
+    gap: 0.5rem;
+    z-index: 1000;
+}
+
+.status, .status-badge {
     padding: 0.5rem 1rem;
     border-radius: 0.5rem;
     font-size: 0.875rem;
+    white-space: nowrap;
 }
 
 .status.connected {
@@ -196,102 +203,14 @@ body {
     color: #721c24;
 }
 
-/* Status Dashboard */
-.status-dashboard {
-    max-width: 800px;
-    margin: 1rem auto;
-    background: white;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    border-radius: 0.5rem;
-    overflow: hidden;
-}
-
-.status-header {
-    background: #f8f9fa;
-    padding: 0.75rem 1rem;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    cursor: pointer;
-    border-bottom: 1px solid #dee2e6;
-}
-
-.status-header h3 {
-    margin: 0;
-    font-size: 1rem;
+.status-badge {
+    background: #e9ecef;
     color: #495057;
+    border: 1px solid #dee2e6;
 }
 
-.toggle-btn {
-    background: none;
-    border: none;
-    font-size: 0.8rem;
-    cursor: pointer;
-    color: #6c757d;
-    transition: transform 0.2s;
-}
-
-.toggle-btn.collapsed {
-    transform: rotate(-90deg);
-}
-
-.status-content {
-    padding: 1rem;
-    max-height: 200px;
-    overflow-y: auto;
-    transition: max-height 0.3s ease;
-}
-
-.status-content.collapsed {
-    max-height: 0;
-    padding: 0 1rem;
-    overflow: hidden;
-}
-
-.status-loading {
-    text-align: center;
-    color: #6c757d;
-    font-style: italic;
-}
-
-.status-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 1rem;
-}
-
-.status-card {
-    background: #f8f9fa;
-    padding: 0.75rem;
-    border-radius: 0.25rem;
-    border-left: 4px solid #dee2e6;
-}
-
-.status-card.connected {
-    border-left-color: #28a745;
-}
-
-.status-card.disconnected {
-    border-left-color: #dc3545;
-}
-
-.status-card.warning {
-    border-left-color: #ffc107;
-}
-
-.status-card h4 {
-    margin: 0 0 0.5rem 0;
-    font-size: 0.9rem;
-    color: #495057;
-}
-
-.status-card .status-value {
-    font-weight: bold;
-    color: #212529;
-}
-
-.status-card .status-detail {
-    font-size: 0.8rem;
-    color: #6c757d;
-    margin-top: 0.25rem;
+.status-badge.healthy {
+    background: #d1ecf1;
+    color: #0c5460;
+    border-color: #bee5eb;
 }

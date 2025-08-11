@@ -5,9 +5,8 @@ class ChatClient {
         this.sendButton = document.getElementById('sendButton');
         this.messages = document.getElementById('messages');
         this.status = document.getElementById('status');
-        this.statusDashboard = document.getElementById('statusDashboard');
-        this.statusContent = document.getElementById('statusContent');
-        this.toggleStatusBtn = document.getElementById('toggleStatus');
+        this.modelStatus = document.getElementById('modelStatus');
+        this.docStatus = document.getElementById('docStatus');
         this.currentResponse = null;
         this.responseBuffer = '';
         
@@ -61,10 +60,6 @@ class ChatClient {
                 this.sendMessage();
             }
         });
-        
-        // Status dashboard toggle
-        this.toggleStatusBtn.addEventListener('click', () => this.toggleStatusDashboard());
-        document.querySelector('.status-header').addEventListener('click', () => this.toggleStatusDashboard());
     }
     
     sendMessage() {
@@ -181,84 +176,28 @@ class ChatClient {
         try {
             const response = await fetch('/api/status');
             const data = await response.json();
-            this.renderStatusDashboard(data);
+            this.updateStatusBadges(data);
         } catch (error) {
             console.error('Error loading system status:', error);
-            this.statusContent.innerHTML = '<div class="status-loading">Error loading system status</div>';
+            this.modelStatus.textContent = 'Model: Error';
+            this.docStatus.textContent = 'Docs: Error';
         }
     }
     
-    renderStatusDashboard(data) {
-        const statusGrid = document.createElement('div');
-        statusGrid.className = 'status-grid';
+    updateStatusBadges(data) {
+        // Update model status
+        const chatModel = data.ollama?.chat_model || 'Unknown';
+        const modelName = chatModel.split(':')[0]; // Extract just the model name (e.g., "llama3.1" from "llama3.1:8b")
+        this.modelStatus.textContent = `Model: ${modelName}`;
         
-        // Processor status
-        const processorCard = this.createStatusCard(
-            'Document Processor',
-            data.processor?.status || 'unknown',
-            [
-                `Documents: ${data.processor?.documents_indexed || 0}`,
-                `Chunks: ${data.processor?.total_chunks || 0}`,
-                `Model: ${data.processor?.embedding_model || 'Unknown'}`
-            ]
-        );
+        // Update document count
+        const docCount = data.processor?.documents_indexed || 0;
+        this.docStatus.textContent = `Docs: ${docCount}`;
         
-        // Ollama status
-        const ollamaCard = this.createStatusCard(
-            'Ollama AI',
-            data.ollama?.status || 'unknown',
-            [
-                `Chat Model: ${data.ollama?.chat_model || 'Unknown'}`,
-                `Available Models: ${data.ollama?.available_models?.length || 0}`,
-                `Host: ${data.ollama?.host || 'Unknown'}`
-            ]
-        );
-        
-        // Chat interface status
-        const chatCard = this.createStatusCard(
-            'Chat Interface',
-            data.status || 'unknown',
-            [
-                `Service: ${data.service || 'Unknown'}`,
-                `WebSocket: ${this.socket?.readyState === WebSocket.OPEN ? 'Connected' : 'Disconnected'}`,
-                `Last Updated: ${new Date().toLocaleTimeString()}`
-            ]
-        );
-        
-        statusGrid.appendChild(processorCard);
-        statusGrid.appendChild(ollamaCard);
-        statusGrid.appendChild(chatCard);
-        
-        this.statusContent.innerHTML = '';
-        this.statusContent.appendChild(statusGrid);
-    }
-    
-    createStatusCard(title, status, details) {
-        const card = document.createElement('div');
-        card.className = `status-card ${status === 'connected' || status === 'healthy' ? 'connected' : 
-                                       status === 'disconnected' || status === 'error' ? 'disconnected' : 'warning'}`;
-        
-        card.innerHTML = `
-            <h4>${title}</h4>
-            <div class="status-value">${status.charAt(0).toUpperCase() + status.slice(1)}</div>
-            ${details.map(detail => `<div class="status-detail">${detail}</div>`).join('')}
-        `;
-        
-        return card;
-    }
-    
-    toggleStatusDashboard() {
-        const isCollapsed = this.statusContent.classList.contains('collapsed');
-        
-        if (isCollapsed) {
-            this.statusContent.classList.remove('collapsed');
-            this.toggleStatusBtn.classList.remove('collapsed');
-            this.toggleStatusBtn.textContent = '▼';
-        } else {
-            this.statusContent.classList.add('collapsed');
-            this.toggleStatusBtn.classList.add('collapsed');
-            this.toggleStatusBtn.textContent = '▶';
-        }
+        // Add healthy class if everything looks good
+        const isHealthy = data.ollama?.status === 'connected' && data.processor?.status === 'connected';
+        this.modelStatus.className = `status-badge ${isHealthy ? 'healthy' : ''}`;
+        this.docStatus.className = `status-badge ${isHealthy ? 'healthy' : ''}`;
     }
 }
 
