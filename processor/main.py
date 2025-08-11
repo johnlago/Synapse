@@ -229,17 +229,17 @@ async def startup():
             logger.error("❌ Chroma client is None, cannot create collection")
             return
             
-        # Try to delete existing collection and recreate with cosine similarity
+        # Get or create collection with cosine similarity
         try:
-            chroma_client.delete_collection("documents")
-            logger.info("Deleted existing collection")
+            collection = chroma_client.get_collection("documents")
+            logger.info("✅ Found existing collection")
         except:
-            logger.info("No existing collection to delete")
-            
-        collection = chroma_client.create_collection(
-            name="documents",
-            metadata={"hnsw:space": "cosine"}
-        )
+            logger.info("Creating new collection...")
+            collection = chroma_client.create_collection(
+                name="documents",
+                metadata={"hnsw:space": "cosine"}
+            )
+            logger.info("✅ Created new collection")
         logger.info("✅ Connected to Chroma collection successfully")
     except Exception as e:
         logger.error(f"❌ Error connecting to Chroma: {e}")
