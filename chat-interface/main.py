@@ -27,6 +27,15 @@ OLLAMA_HOST = os.getenv("OLLAMA_HOST", "host.docker.internal:11434")
 PROCESSOR_HOST = os.getenv("PROCESSOR_HOST", "processor:8001")
 CHAT_MODEL = os.getenv("CHAT_MODEL", "llama3.1:8b")
 
+# Function to detect if a model supports reasoning
+def is_reasoning_model(model_name: str) -> bool:
+    """Check if the model supports reasoning/thinking tags"""
+    reasoning_models = [
+        "llama3.2", "qwen", "deepseek", "r1", "thinking", "reasoning",
+        "claude", "o1", "marco-o1"
+    ]
+    return any(reasoning_keyword in model_name.lower() for reasoning_keyword in reasoning_models)
+
 logger.info(f"Configuration:")
 logger.info(f"  OLLAMA_HOST: {OLLAMA_HOST}")
 logger.info(f"  PROCESSOR_HOST: {PROCESSOR_HOST}")
@@ -159,7 +168,7 @@ async def chat_with_ollama(message: str) -> AsyncGenerator[str, None]:
                     search_result = await tool_caller.search_documents(message, limit=3)
                     
                     # Create context-aware prompt with better formatting
-                    context_prompt = f"""You are helping a user search through their personal notes. Based on their question: "{message}"
+                    base_prompt = f"""You are helping a user search through their personal notes. Based on their question: "{message}"
 
 Here's what I found in their documents:
 {search_result}
@@ -183,6 +192,21 @@ Guidelines:
 - Use markdown formatting for better readability
 
 User question: {message}"""
+                    
+                    # Adjust thinking instruction based on model
+                    if "qwen" in CHAT_MODEL.lower():
+                        context_prompt = base_prompt + "\n\nWhen analyzing the search results, feel free to show your reasoning process naturally before providing your structured response."
+                    else:
+                        context_prompt = base_prompt + """\n\nUse <thinking>...</thinking> tags to show your reasoning process before providing your final structured response. For example:
+
+<thinking>
+Let me analyze the search results:
+1. What information is relevant...
+2. How to structure the answer...
+3. What references to include...
+</thinking>
+
+Then provide your structured response."""
                     
                     # Stream response with context
                     payload = {
@@ -218,11 +242,27 @@ User question: {message}"""
 
 async def stream_normal_response(client: httpx.AsyncClient, message: str):
     """Stream a normal chat response without tools"""
-    system_context = """You are a helpful assistant for a personal note-taking system. 
+    base_context = """You are a helpful assistant for a personal note-taking system. 
     
 You can help users search through their notes and documents. When they ask about specific topics, projects, or information, let them know you can search their documents.
 
 For general conversation, respond naturally and helpfully."""
+    
+    # Check if it's Qwen model and let it use its natural thinking format
+    if "qwen" in CHAT_MODEL.lower():
+        system_context = base_context + "\n\nWhen you need to think through complex problems, feel free to show your reasoning process naturally."
+    else:
+        # For other models, provide explicit thinking instructions
+        system_context = base_context + """\n\nFor complex questions, use <thinking>...</thinking> tags to show your reasoning process before providing your final answer. For example:
+
+<thinking>
+Let me think about this step by step:
+1. First consideration...
+2. Second point...
+3. Conclusion...
+</thinking>
+
+Then provide your actual response."""
     
     payload = {
         "model": CHAT_MODEL,

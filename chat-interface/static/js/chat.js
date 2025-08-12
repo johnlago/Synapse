@@ -93,14 +93,14 @@ class ChatClient {
                 // Accumulate the response buffer
                 this.responseBuffer += data.content;
                 
-                // Render markdown in real-time
-                this.renderMarkdownResponse(this.responseBuffer);
+                // Render with thinking support in real-time
+                this.renderResponseWithThinking(this.responseBuffer);
                 this.scrollToBottom();
             }
         } else if (data.type === 'end') {
             // Final render to ensure everything is properly formatted
             if (this.currentResponse && this.responseBuffer) {
-                this.renderMarkdownResponse(this.responseBuffer);
+                this.renderResponseWithThinking(this.responseBuffer);
             }
             
             this.currentResponse = null;
@@ -129,6 +129,153 @@ class ChatClient {
         }
     }
     
+    renderResponseWithThinking(content) {
+        if (!this.currentResponse) return;
+        
+        // Parse thinking content from response
+        const { thinking, response } = this.parseThinkingContent(content);
+        
+        // Debug logging
+        console.log('Content length:', content?.length || 0);
+        console.log('Has thinking:', !!thinking);
+        if (thinking) {
+            console.log('Thinking preview:', thinking.substring(0, 100));
+        }
+        
+        if (thinking) {
+            // Create structure for thinking + response
+            this.currentResponse.classList.add('has-thinking');
+            
+            const thinkingSection = this.createThinkingSection(thinking);
+            const responseSection = this.createResponseSection(response);
+            
+            this.currentResponse.innerHTML = '';
+            this.currentResponse.appendChild(thinkingSection);
+            this.currentResponse.appendChild(responseSection);
+        } else {
+            // No thinking content, render normally
+            this.renderMarkdownResponse(content);
+        }
+    }
+    
+    parseThinkingContent(content) {
+        // Handle null/undefined content
+        if (!content) {
+            return { thinking: null, response: '' };
+        }
+        
+        // Look for thinking content in various formats
+        const patterns = [
+            // XML-style tags
+            /<thinking>(.*?)<\/thinking>/gs,
+            /<think>(.*?)<\/think>/gs,
+            /\[THINKING\](.*?)\[\/THINKING\]/gs,
+            /\[thinking\](.*?)\[\/thinking\]/gs,
+            // Qwen's format: "Thinking..." followed by "...done thinking."
+            /Thinking\.\.\.(.*?)\.\.\.done thinking\./gs,
+            // Alternative formats
+            /^Thinking:\s*(.*?)(?=\n\n|\n[A-Z]|$)/gs,
+            /\*thinking\*(.*?)\*\/thinking\*/gs
+        ];
+        
+        for (const pattern of patterns) {
+            const match = content.match(pattern);
+            if (match && match[1]) {
+                const thinking = match[1].trim();
+                const response = content.replace(pattern, '').trim();
+                return { thinking, response };
+            }
+        }
+        
+        // Try to detect Qwen's natural thinking pattern
+        // Look for thinking content followed by structured sections like "Answer", "## Answer", etc.
+        const structuredSectionPattern = /^(.*?)(?=\n(?:Answer|## Answer|# Answer|\*\*Answer\*\*|References|## References))/s;
+        const match = content.match(structuredSectionPattern);
+        
+        if (match && match[1]) {
+            const potentialThinking = match[1].trim();
+            const remainingContent = content.substring(match[0].length).trim();
+            
+            // Check if the potential thinking section looks like actual thinking
+            // (contains reasoning words, is longer than a simple sentence, etc.)
+            const thinkingIndicators = [
+                'let me', 'first', 'second', 'i need', 'i should', 'the user', 'this means',
+                'result 1', 'result 2', 'result 3', 'similarity', 'relevant', 'seems',
+                'so the', 'therefore', 'however', 'but', 'because', 'since', 'given'
+            ];
+            
+            const hasThinkingIndicators = thinkingIndicators.some(indicator => 
+                potentialThinking.toLowerCase().includes(indicator)
+            );
+            
+            // Only treat as thinking if it's substantial and has reasoning indicators
+            if (potentialThinking.length > 50 && hasThinkingIndicators && remainingContent.length > 0) {
+                return { thinking: potentialThinking, response: remainingContent };
+            }
+        }
+        
+        return { thinking: null, response: content };
+    }
+    
+    createThinkingSection(thinking) {
+        const section = document.createElement('div');
+        section.className = 'thinking-section';
+        
+        const header = document.createElement('div');
+        header.className = 'thinking-header';
+        header.innerHTML = `
+            <span class="thinking-toggle">▶</span>
+            <span>🤔 Model's thinking process</span>
+        `;
+        
+        const content = document.createElement('div');
+        content.className = 'thinking-content';
+        content.textContent = thinking;
+        
+        // Add click handler for toggle
+        header.addEventListener('click', () => {
+            const toggle = header.querySelector('.thinking-toggle');
+            const isExpanded = content.classList.contains('expanded');
+            
+            if (isExpanded) {
+                content.classList.remove('expanded');
+                toggle.classList.remove('expanded');
+                toggle.textContent = '▶';
+            } else {
+                content.classList.add('expanded');
+                toggle.classList.add('expanded');
+                toggle.textContent = '▼';
+            }
+        });
+        
+        section.appendChild(header);
+        section.appendChild(content);
+        
+        return section;
+    }
+    
+    createResponseSection(response) {
+        const section = document.createElement('div');
+        section.className = 'response-content';
+        
+        try {
+            // Convert markdown to HTML
+            const rawHtml = marked.parse(response);
+            
+            // Sanitize the HTML to prevent XSS
+            const cleanHtml = DOMPurify.sanitize(rawHtml);
+            
+            // Set the sanitized HTML
+            section.innerHTML = cleanHtml;
+        } catch (error) {
+            console.error('Error rendering markdown:', error);
+            // Fallback to plain text
+            section.textContent = response;
+        }
+        
+        return section;
+    }
+    
     addMessage(content, sender) {
         const messageDiv = document.createElement('div');
         messageDiv.className = `message ${sender}-message`;
@@ -137,11 +284,23 @@ class ChatClient {
             // User messages are plain text
             messageDiv.textContent = content;
         } else {
-            // Assistant messages support markdown
+            // Assistant messages support markdown and thinking
             if (content === 'Thinking...') {
                 messageDiv.textContent = content;
             } else {
-                this.renderMarkdownInElement(messageDiv, content);
+                const { thinking, response } = this.parseThinkingContent(content);
+                
+                if (thinking) {
+                    messageDiv.classList.add('has-thinking');
+                    
+                    const thinkingSection = this.createThinkingSection(thinking);
+                    const responseSection = this.createResponseSection(response);
+                    
+                    messageDiv.appendChild(thinkingSection);
+                    messageDiv.appendChild(responseSection);
+                } else {
+                    this.renderMarkdownInElement(messageDiv, content);
+                }
             }
         }
         
