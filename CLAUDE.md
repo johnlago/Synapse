@@ -41,8 +41,11 @@ cp .env.example .env
 
 ### Container Management
 ```bash
-# Start all services
+# Start all services (default)
 docker-compose up -d
+
+# Start services on Linux (workaround for Ollama IPv6/IPv4 issue)
+docker-compose -f docker-compose.yml -f docker-compose.linux.yml up -d
 
 # View logs for specific service
 docker-compose logs -f processor
@@ -118,6 +121,22 @@ claude mcp add local-rag -- docker exec -i local-rag-db-mcp-server-1 python /app
 - Ensure Ollama is running locally: `ollama serve`
 - Verify models are pulled: `ollama list`
 - Check Docker host connectivity to host.docker.internal
+
+### Linux Ollama Connectivity Issue
+On Linux, Ollama has an IPv6/IPv4 binding issue where:
+- `OLLAMA_HOST=0.0.0.0` makes it listen only on IPv6
+- Default configuration makes it listen only on loopback (127.0.0.1)
+
+**Solution**: Use the Linux-specific override:
+```bash
+# Use Linux-specific configuration
+docker-compose -f docker-compose.yml -f docker-compose.linux.yml up -d
+
+# Or copy the Linux environment file
+cp .env.linux .env
+```
+
+This uses host networking for services that need Ollama access.
 
 ### Document Processing
 - File watching monitors `./documents` for real-time processing

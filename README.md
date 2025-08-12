@@ -13,10 +13,37 @@ A containerized RAG (Retrieval-Augmented Generation) system using Chroma, Ollama
 - **MCP Server**: Claude Code integration for RAG queries
 - **Processor**: File watching and document ingestion
 
+## Linux note
+
+We need to make Ollama listen on all interfaces (so that our services in docker containers can reach the Ollama on the host)
+Remember what this means -- anyone in your local network reach out to the Ollama on your device, if your local firewall allows
+
+Edit `sudo vim /usr/lib/systemd/system/ollama.service`
+
+Add
+```
+Environment="OLLAMA_HOST=0.0.0.0"
+```
+
+And run
+```
+sudo systemctl daemon-reload
+sudo systemctl restart ollama
+```
+
+### Note on IPv6 + Linux
+
+There seem to be a bug on Ollama which causes it to Listen on only ipv6 interface. For now, I have disabled ipv6 on my system
+to make it work
+
 ## Quick Start
 
 1. **Install and start Ollama locally:**
 
+Check [HERE](https://ollama.com/library) and find a model that will work on your machine.
+The higher the parameter count, the better it is, and heavier it will be on your CPU/GPU.
+
+If unsure, start with `llama3.1:8b`
 
 Note: It is best to run Ollama natively rather than on a container -- Makes things easier to use GPU
 
@@ -27,6 +54,9 @@ Note: It is best to run Ollama natively rather than on a container -- Makes thin
    
    # Pull the embedding model
    ollama pull mxbai-embed-large
+
+   # pull the chat model
+   ollama pull llama3.1:8b
    ```
 
 2. **Configure document path (optional):**

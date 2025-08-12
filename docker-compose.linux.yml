@@ -1,0 +1,28 @@
+# Linux-specific overrides to work around Ollama IPv6/IPv4 binding issue
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.linux.yml up -d
+
+services:
+  processor:
+    network_mode: host
+    environment:
+      - OLLAMA_HOST=127.0.0.1:11434
+      - CHROMA_HOST=127.0.0.1:8000
+      - PROCESSOR_HOST=127.0.0.1:8001
+    # Remove extra_hosts when using host mode  
+    extra_hosts: []
+
+  mcp-server:
+    network_mode: host
+    environment:
+      - OLLAMA_HOST=127.0.0.1:11434
+      - CHROMA_HOST=127.0.0.1:8000
+    # Remove extra_hosts when using host mode  
+    extra_hosts: []
+
+  chat-interface:
+    network_mode: host
+    environment:
+      - OLLAMA_HOST=127.0.0.1:11434
+      - PROCESSOR_HOST=127.0.0.1:8001
+    # Remove extra_hosts when using host mode  
+    extra_hosts: []
