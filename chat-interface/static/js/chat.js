@@ -9,6 +9,9 @@ class ChatClient {
         this.docStatus = document.getElementById('docStatus');
         this.currentResponse = null;
         this.responseBuffer = '';
+        this.thinkingBuffer = '';
+        this.isInThinking = false;
+        this.hasThinking = false;
         
         // Configure marked.js for safe markdown rendering
         marked.setOptions({
@@ -73,10 +76,13 @@ class ChatClient {
         this.messageInput.value = '';
         this.sendButton.disabled = true;
         
-        // Show typing indicator
+        // Show typing indicator and reset streaming state
         this.currentResponse = this.addMessage('Thinking...', 'assistant');
         this.currentResponse.classList.add('typing-indicator');
         this.responseBuffer = '';
+        this.thinkingBuffer = '';
+        this.isInThinking = false;
+        this.hasThinking = false;
         
         // Send to server
         this.socket.send(JSON.stringify({ message }));
@@ -90,24 +96,114 @@ class ChatClient {
             }
             
             if (this.currentResponse) {
-                // Accumulate the response buffer
-                this.responseBuffer += data.content;
-                
-                // Render with thinking support in real-time
-                this.renderResponseWithThinking(this.responseBuffer);
-                this.scrollToBottom();
+                // Process the chunk for thinking tags
+                this.processStreamingChunk(data.content);
             }
         } else if (data.type === 'end') {
-            // Final render to ensure everything is properly formatted
-            if (this.currentResponse && this.responseBuffer) {
-                this.renderResponseWithThinking(this.responseBuffer);
+            // Final render with thinking support when stream is complete
+            if (this.currentResponse) {
+                this.renderFinalResponse();
             }
             
-            this.currentResponse = null;
-            this.responseBuffer = '';
-            this.sendButton.disabled = false;
-            this.messageInput.focus();
+            this.resetStreamingState();
         }
+    }
+    
+    processStreamingChunk(chunk) {
+        let remainingChunk = chunk;
+        
+        while (remainingChunk.length > 0) {
+            if (!this.isInThinking) {
+                // Look for start of thinking tag
+                const thinkStart = remainingChunk.indexOf('<think>');
+                if (thinkStart !== -1) {
+                    // Add content before thinking tag to response
+                    if (thinkStart > 0) {
+                        this.responseBuffer += remainingChunk.substring(0, thinkStart);
+                        this.renderMarkdownResponse(this.responseBuffer);
+                    }
+                    
+                    // Enter thinking mode
+                    this.isInThinking = true;
+                    this.hasThinking = true;
+                    this.showThinkingIndicator();
+                    
+                    // Continue with content after the tag
+                    remainingChunk = remainingChunk.substring(thinkStart + 7); // 7 = '<think>'.length
+                } else {
+                    // No thinking tag, add to response buffer
+                    this.responseBuffer += remainingChunk;
+                    this.renderMarkdownResponse(this.responseBuffer);
+                    break;
+                }
+            } else {
+                // We're in thinking mode, look for end tag
+                const thinkEnd = remainingChunk.indexOf('</think>');
+                if (thinkEnd !== -1) {
+                    // Add content before end tag to thinking buffer
+                    this.thinkingBuffer += remainingChunk.substring(0, thinkEnd);
+                    
+                    // Exit thinking mode
+                    this.isInThinking = false;
+                    this.hideThinkingIndicator();
+                    
+                    // Continue with content after the tag
+                    remainingChunk = remainingChunk.substring(thinkEnd + 8); // 8 = '</think>'.length
+                } else {
+                    // Still in thinking, add to thinking buffer
+                    this.thinkingBuffer += remainingChunk;
+                    break;
+                }
+            }
+        }
+        
+        this.scrollToBottom();
+    }
+    
+    showThinkingIndicator() {
+        if (this.currentResponse && !this.currentResponse.querySelector('.thinking-indicator-live')) {
+            const indicator = document.createElement('div');
+            indicator.className = 'thinking-indicator-live';
+            indicator.innerHTML = '🤔 <em>Thinking...</em>';
+            indicator.style.cssText = 'color: #666; font-style: italic; margin-bottom: 10px;';
+            this.currentResponse.appendChild(indicator);
+        }
+    }
+    
+    hideThinkingIndicator() {
+        if (this.currentResponse) {
+            const indicator = this.currentResponse.querySelector('.thinking-indicator-live');
+            if (indicator) {
+                indicator.remove();
+            }
+        }
+    }
+    
+    renderFinalResponse() {
+        if (this.hasThinking && this.thinkingBuffer) {
+            // Create thinking + response structure
+            this.currentResponse.classList.add('has-thinking');
+            
+            const thinkingSection = this.createThinkingSection(this.thinkingBuffer);
+            const responseSection = this.createResponseSection(this.responseBuffer);
+            
+            this.currentResponse.innerHTML = '';
+            this.currentResponse.appendChild(thinkingSection);
+            this.currentResponse.appendChild(responseSection);
+        } else {
+            // No thinking content, just render the response
+            this.renderMarkdownResponse(this.responseBuffer);
+        }
+    }
+    
+    resetStreamingState() {
+        this.currentResponse = null;
+        this.responseBuffer = '';
+        this.thinkingBuffer = '';
+        this.isInThinking = false;
+        this.hasThinking = false;
+        this.sendButton.disabled = false;
+        this.messageInput.focus();
     }
     
     renderMarkdownResponse(content) {
@@ -135,12 +231,7 @@ class ChatClient {
         // Parse thinking content from response
         const { thinking, response } = this.parseThinkingContent(content);
         
-        // Debug logging
-        console.log('Content length:', content?.length || 0);
-        console.log('Has thinking:', !!thinking);
-        if (thinking) {
-            console.log('Thinking preview:', thinking.substring(0, 100));
-        }
+        console.log('Thinking parsed:', thinking ? 'YES' : 'NO');
         
         if (thinking) {
             // Create structure for thinking + response
@@ -161,56 +252,29 @@ class ChatClient {
     parseThinkingContent(content) {
         // Handle null/undefined content
         if (!content) {
+            console.log('parseThinkingContent: content is null/undefined');
             return { thinking: null, response: '' };
         }
         
-        // Look for thinking content in various formats
+        
+        // Look for thinking content in XML-style tags
         const patterns = [
-            // XML-style tags
             /<thinking>(.*?)<\/thinking>/gs,
             /<think>(.*?)<\/think>/gs,
             /\[THINKING\](.*?)\[\/THINKING\]/gs,
-            /\[thinking\](.*?)\[\/thinking\]/gs,
-            // Qwen's format: "Thinking..." followed by "...done thinking."
-            /Thinking\.\.\.(.*?)\.\.\.done thinking\./gs,
-            // Alternative formats
-            /^Thinking:\s*(.*?)(?=\n\n|\n[A-Z]|$)/gs,
-            /\*thinking\*(.*?)\*\/thinking\*/gs
+            /\[thinking\](.*?)\[\/thinking\]/gs
         ];
         
-        for (const pattern of patterns) {
+        for (let i = 0; i < patterns.length; i++) {
+            const pattern = patterns[i];
             const match = content.match(pattern);
-            if (match && match[1]) {
+            if (match && match[1] !== undefined) {
                 const thinking = match[1].trim();
-                const response = content.replace(pattern, '').trim();
+                const response = content.replace(match[0], '').trim();
+                console.log('Successfully parsed thinking content with pattern', i + 1);
+                console.log('Thinking length:', thinking.length);
+                console.log('Response length:', response.length);
                 return { thinking, response };
-            }
-        }
-        
-        // Try to detect Qwen's natural thinking pattern
-        // Look for thinking content followed by structured sections like "Answer", "## Answer", etc.
-        const structuredSectionPattern = /^(.*?)(?=\n(?:Answer|## Answer|# Answer|\*\*Answer\*\*|References|## References))/s;
-        const match = content.match(structuredSectionPattern);
-        
-        if (match && match[1]) {
-            const potentialThinking = match[1].trim();
-            const remainingContent = content.substring(match[0].length).trim();
-            
-            // Check if the potential thinking section looks like actual thinking
-            // (contains reasoning words, is longer than a simple sentence, etc.)
-            const thinkingIndicators = [
-                'let me', 'first', 'second', 'i need', 'i should', 'the user', 'this means',
-                'result 1', 'result 2', 'result 3', 'similarity', 'relevant', 'seems',
-                'so the', 'therefore', 'however', 'but', 'because', 'since', 'given'
-            ];
-            
-            const hasThinkingIndicators = thinkingIndicators.some(indicator => 
-                potentialThinking.toLowerCase().includes(indicator)
-            );
-            
-            // Only treat as thinking if it's substantial and has reasoning indicators
-            if (potentialThinking.length > 50 && hasThinkingIndicators && remainingContent.length > 0) {
-                return { thinking: potentialThinking, response: remainingContent };
             }
         }
         

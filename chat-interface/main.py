@@ -193,18 +193,15 @@ Guidelines:
 
 User question: {message}"""
                     
-                    # Adjust thinking instruction based on model
-                    if "qwen" in CHAT_MODEL.lower():
-                        context_prompt = base_prompt + "\n\nWhen analyzing the search results, feel free to show your reasoning process naturally before providing your structured response."
-                    else:
-                        context_prompt = base_prompt + """\n\nUse <thinking>...</thinking> tags to show your reasoning process before providing your final structured response. For example:
+                    # Provide explicit thinking instructions
+                    context_prompt = base_prompt + """\n\nIMPORTANT: Use <think>...</think> tags to show your reasoning process before providing your final structured response. For example:
 
-<thinking>
+<think>
 Let me analyze the search results:
 1. What information is relevant...
 2. How to structure the answer...
 3. What references to include...
-</thinking>
+</think>
 
 Then provide your structured response."""
                     
@@ -215,6 +212,7 @@ Then provide your structured response."""
                         "stream": True
                     }
                     
+                    full_response = ""  # Track the complete response
                     async with client.stream('POST', f"http://{OLLAMA_HOST}/api/generate", json=payload) as response:
                         response.raise_for_status()
                         async for line in response.aiter_lines():
@@ -222,7 +220,14 @@ Then provide your structured response."""
                                 try:
                                     data = json.loads(line)
                                     if 'response' in data and data['response']:
-                                        yield data['response']
+                                        chunk = data['response']
+                                        full_response += chunk
+                                        yield chunk
+                                    elif data.get('done', False):
+                                        # Log the complete response when done
+                                        logger.info(f"COMPLETE QWEN RESPONSE:\n{full_response}")
+                                        logger.info(f"Response contains <think>: {'<think>' in full_response}")
+                                        logger.info(f"Response contains thinking: {'thinking' in full_response.lower()}")
                                 except json.JSONDecodeError:
                                     continue
                                     
@@ -248,19 +253,15 @@ You can help users search through their notes and documents. When they ask about
 
 For general conversation, respond naturally and helpfully."""
     
-    # Check if it's Qwen model and let it use its natural thinking format
-    if "qwen" in CHAT_MODEL.lower():
-        system_context = base_context + "\n\nWhen you need to think through complex problems, feel free to show your reasoning process naturally."
-    else:
-        # For other models, provide explicit thinking instructions
-        system_context = base_context + """\n\nFor complex questions, use <thinking>...</thinking> tags to show your reasoning process before providing your final answer. For example:
+    # Provide explicit thinking instructions for all models
+    system_context = base_context + """\n\nIMPORTANT: For any question that requires analysis or reasoning, you MUST use <think>...</think> tags to show your thought process before providing your final answer. For example:
 
-<thinking>
+<think>
 Let me think about this step by step:
 1. First consideration...
 2. Second point...
 3. Conclusion...
-</thinking>
+</think>
 
 Then provide your actual response."""
     
@@ -270,6 +271,7 @@ Then provide your actual response."""
         "stream": True
     }
     
+    full_response = ""  # Track the complete response
     async with client.stream('POST', f"http://{OLLAMA_HOST}/api/generate", json=payload) as response:
         response.raise_for_status()
         async for line in response.aiter_lines():
@@ -277,7 +279,14 @@ Then provide your actual response."""
                 try:
                     data = json.loads(line)
                     if 'response' in data and data['response']:
-                        yield data['response']
+                        chunk = data['response']
+                        full_response += chunk
+                        yield chunk
+                    elif data.get('done', False):
+                        # Log the complete response when done
+                        logger.info(f"COMPLETE QWEN NORMAL RESPONSE:\n{full_response}")
+                        logger.info(f"Response contains <think>: {'<think>' in full_response}")
+                        logger.info(f"Response contains thinking: {'thinking' in full_response.lower()}")
                 except json.JSONDecodeError:
                     continue
 
