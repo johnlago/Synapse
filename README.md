@@ -13,10 +13,58 @@ A containerized RAG (Retrieval-Augmented Generation) system using Chroma, Ollama
 - **MCP Server**: Claude Code integration for RAG queries
 - **Processor**: File watching and document ingestion
 
+## Linux Networking Issues and Workarounds
+
+### Ollama IPv6/IPv4 Binding Issue
+
+On Linux systems, Ollama has a known networking issue where it doesn't properly bind to both IPv4 and IPv6:
+
+- **Setting `OLLAMA_HOST=0.0.0.0`**: Makes Ollama listen only on IPv6, breaking IPv4 connectivity
+- **Default configuration**: Makes Ollama listen only on loopback (127.0.0.1), preventing Docker container access
+
+### Recommended Solution: Host Networking (Used by this project)
+
+This project uses **host networking** for services that need Ollama access as the most reliable workaround:
+
+**Advantages:**
+- ✅ Bypasses Docker's network isolation issues with Ollama
+- ✅ Works consistently across different Linux distributions
+- ✅ No need to modify Ollama's systemd configuration
+- ✅ Automatic OS detection via Makefile
+
+**Security Considerations:**
+- ⚠️ Services using host networking expose ports directly on your host
+- ⚠️ Potential port conflicts with other services
+- ⚠️ Reduced network isolation compared to bridge networking
+
+**Ports exposed on host when using Linux configuration:**
+- `8001` - Processor service
+- `8002` - MCP server  
+- `8003` - Chat interface
+- ChromaDB remains isolated in bridge network
+
+### Alternative: Manual Ollama Configuration (Not recommended)
+
+If you prefer to modify Ollama instead of using host networking:
+
+1. Edit Ollama service: `sudo vim /usr/lib/systemd/system/ollama.service`
+2. Add: `Environment="OLLAMA_HOST=0.0.0.0"`
+3. Reload and restart:
+   ```bash
+   sudo systemctl daemon-reload
+   sudo systemctl restart ollama
+   ```
+
+**⚠️ Security Warning**: This exposes Ollama to your entire local network, allowing anyone on your network to access your Ollama instance if your firewall permits.
+
 ## Quick Start
 
 1. **Install and start Ollama locally:**
 
+Check [HERE](https://ollama.com/library) and find a model that will work on your machine.
+The higher the parameter count, the better it is, and heavier it will be on your CPU/GPU.
+
+If unsure, start with `llama3.1:8b`
 
 Note: It is best to run Ollama natively rather than on a container -- Makes things easier to use GPU
 
@@ -27,6 +75,9 @@ Note: It is best to run Ollama natively rather than on a container -- Makes thin
    
    # Pull the embedding model
    ollama pull mxbai-embed-large
+
+   # pull the chat model
+   ollama pull llama3.1:8b
    ```
 
 2. **Configure document path (optional):**
@@ -40,22 +91,71 @@ Note: It is best to run Ollama natively rather than on a container -- Makes thin
 
 3. **Start the Docker services:**
    ```bash
-   docker-compose up -d
+   # Recommended: Use Makefile (automatically detects OS)
+   make up
+   
+   # Or manually:
+   # On macOS: docker-compose up -d
+   # On Linux: docker-compose -f docker-compose.yml -f docker-compose.linux.yml up -d
    ```
 
 4. **Process documents:**
    ```bash
+   # Using Makefile
+   make process-all
+   
+   # Or directly
    curl -X POST http://localhost:8001/process-all
    ```
 
 5. **Check status:**
    ```bash
+   # Using Makefile
+   make status
+   
+   # Or directly
    curl http://localhost:8001/status
    ```
-6. **Reset Everything --  delete the collection in chroma**
+
+6. **Reset Everything -- delete the collection in chroma:**
    ```bash
-   curl http://localhost:8001/reset
+   # Using Makefile
+   make reset
+   
+   # Or directly
+   curl -X POST http://localhost:8001/reset
    ```
+
+## Makefile Commands
+
+This project includes a Makefile that automatically detects your operating system and uses the appropriate Docker Compose configuration.
+
+### Available Commands
+
+```bash
+make help           # Show all available commands
+make up             # Start all services (OS-aware)
+make down           # Stop all services
+make logs           # Show logs for all services
+make logs-processor # Show logs for processor service only
+make logs-chat      # Show logs for chat interface only
+make logs-mcp       # Show logs for MCP server only
+make build          # Build all services
+make rebuild        # Rebuild and restart all services
+make status         # Check system status
+make process-all    # Process all documents
+make reset          # Reset document collection
+make search QUERY="search terms"  # Search documents
+make clean          # Stop and remove all containers and volumes
+```
+
+### OS Detection
+
+The Makefile automatically detects your operating system:
+- **Linux**: Uses `docker-compose -f docker-compose.yml -f docker-compose.linux.yml`
+- **macOS**: Uses standard `docker-compose`
+
+Run `make help` to see which configuration is being used on your system.
 
 ## Chat Interface with Local LLM
 
