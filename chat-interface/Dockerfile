@@ -6,6 +6,9 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Cache busting step - this ensures fresh builds every time
+RUN echo "Build timestamp: $(date)" > /tmp/build_timestamp
+
 # Copy application code
 COPY . .
 

@@ -27,6 +27,15 @@ OLLAMA_HOST = os.getenv("OLLAMA_HOST", "host.docker.internal:11434")
 PROCESSOR_HOST = os.getenv("PROCESSOR_HOST", "processor:8001")
 CHAT_MODEL = os.getenv("CHAT_MODEL", "llama3.1:8b")
 
+# Function to detect if a model supports reasoning
+def is_reasoning_model(model_name: str) -> bool:
+    """Check if the model supports reasoning/thinking tags"""
+    reasoning_models = [
+        "llama3.2", "qwen", "deepseek", "r1", "thinking", "reasoning",
+        "claude", "o1", "marco-o1"
+    ]
+    return any(reasoning_keyword in model_name.lower() for reasoning_keyword in reasoning_models)
+
 logger.info(f"Configuration:")
 logger.info(f"  OLLAMA_HOST: {OLLAMA_HOST}")
 logger.info(f"  PROCESSOR_HOST: {PROCESSOR_HOST}")
@@ -159,7 +168,7 @@ async def chat_with_ollama(message: str) -> AsyncGenerator[str, None]:
                     search_result = await tool_caller.search_documents(message, limit=3)
                     
                     # Create context-aware prompt with better formatting
-                    context_prompt = f"""You are helping a user search through their personal notes. Based on their question: "{message}"
+                    base_prompt = f"""You are helping a user search through their personal notes. Based on their question: "{message}"
 
 Here's what I found in their documents:
 {search_result}
@@ -184,6 +193,18 @@ Guidelines:
 
 User question: {message}"""
                     
+                    # Provide explicit thinking instructions
+                    context_prompt = base_prompt + """\n\nIMPORTANT: Use <think>...</think> tags to show your reasoning process before providing your final structured response. For example:
+
+<think>
+Let me analyze the search results:
+1. What information is relevant...
+2. How to structure the answer...
+3. What references to include...
+</think>
+
+Then provide your structured response."""
+                    
                     # Stream response with context
                     payload = {
                         "model": CHAT_MODEL,
@@ -191,6 +212,7 @@ User question: {message}"""
                         "stream": True
                     }
                     
+                    full_response = ""  # Track the complete response
                     async with client.stream('POST', f"http://{OLLAMA_HOST}/api/generate", json=payload) as response:
                         response.raise_for_status()
                         async for line in response.aiter_lines():
@@ -198,7 +220,14 @@ User question: {message}"""
                                 try:
                                     data = json.loads(line)
                                     if 'response' in data and data['response']:
-                                        yield data['response']
+                                        chunk = data['response']
+                                        full_response += chunk
+                                        yield chunk
+                                    elif data.get('done', False):
+                                        # Log the complete response when done
+                                        logger.info(f"COMPLETE QWEN RESPONSE:\n{full_response}")
+                                        logger.info(f"Response contains <think>: {'<think>' in full_response}")
+                                        logger.info(f"Response contains thinking: {'thinking' in full_response.lower()}")
                                 except json.JSONDecodeError:
                                     continue
                                     
@@ -218,11 +247,23 @@ User question: {message}"""
 
 async def stream_normal_response(client: httpx.AsyncClient, message: str):
     """Stream a normal chat response without tools"""
-    system_context = """You are a helpful assistant for a personal note-taking system. 
+    base_context = """You are a helpful assistant for a personal note-taking system. 
     
 You can help users search through their notes and documents. When they ask about specific topics, projects, or information, let them know you can search their documents.
 
 For general conversation, respond naturally and helpfully."""
+    
+    # Provide explicit thinking instructions for all models
+    system_context = base_context + """\n\nIMPORTANT: For any question that requires analysis or reasoning, you MUST use <think>...</think> tags to show your thought process before providing your final answer. For example:
+
+<think>
+Let me think about this step by step:
+1. First consideration...
+2. Second point...
+3. Conclusion...
+</think>
+
+Then provide your actual response."""
     
     payload = {
         "model": CHAT_MODEL,
@@ -230,6 +271,7 @@ For general conversation, respond naturally and helpfully."""
         "stream": True
     }
     
+    full_response = ""  # Track the complete response
     async with client.stream('POST', f"http://{OLLAMA_HOST}/api/generate", json=payload) as response:
         response.raise_for_status()
         async for line in response.aiter_lines():
@@ -237,7 +279,14 @@ For general conversation, respond naturally and helpfully."""
                 try:
                     data = json.loads(line)
                     if 'response' in data and data['response']:
-                        yield data['response']
+                        chunk = data['response']
+                        full_response += chunk
+                        yield chunk
+                    elif data.get('done', False):
+                        # Log the complete response when done
+                        logger.info(f"COMPLETE QWEN NORMAL RESPONSE:\n{full_response}")
+                        logger.info(f"Response contains <think>: {'<think>' in full_response}")
+                        logger.info(f"Response contains thinking: {'thinking' in full_response.lower()}")
                 except json.JSONDecodeError:
                     continue
 

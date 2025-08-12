@@ -9,6 +9,9 @@ class ChatClient {
         this.docStatus = document.getElementById('docStatus');
         this.currentResponse = null;
         this.responseBuffer = '';
+        this.thinkingBuffer = '';
+        this.isInThinking = false;
+        this.hasThinking = false;
         
         // Configure marked.js for safe markdown rendering
         marked.setOptions({
@@ -73,10 +76,13 @@ class ChatClient {
         this.messageInput.value = '';
         this.sendButton.disabled = true;
         
-        // Show typing indicator
+        // Show typing indicator and reset streaming state
         this.currentResponse = this.addMessage('Thinking...', 'assistant');
         this.currentResponse.classList.add('typing-indicator');
         this.responseBuffer = '';
+        this.thinkingBuffer = '';
+        this.isInThinking = false;
+        this.hasThinking = false;
         
         // Send to server
         this.socket.send(JSON.stringify({ message }));
@@ -90,24 +96,114 @@ class ChatClient {
             }
             
             if (this.currentResponse) {
-                // Accumulate the response buffer
-                this.responseBuffer += data.content;
-                
-                // Render markdown in real-time
-                this.renderMarkdownResponse(this.responseBuffer);
-                this.scrollToBottom();
+                // Process the chunk for thinking tags
+                this.processStreamingChunk(data.content);
             }
         } else if (data.type === 'end') {
-            // Final render to ensure everything is properly formatted
-            if (this.currentResponse && this.responseBuffer) {
-                this.renderMarkdownResponse(this.responseBuffer);
+            // Final render with thinking support when stream is complete
+            if (this.currentResponse) {
+                this.renderFinalResponse();
             }
             
-            this.currentResponse = null;
-            this.responseBuffer = '';
-            this.sendButton.disabled = false;
-            this.messageInput.focus();
+            this.resetStreamingState();
         }
+    }
+    
+    processStreamingChunk(chunk) {
+        let remainingChunk = chunk;
+        
+        while (remainingChunk.length > 0) {
+            if (!this.isInThinking) {
+                // Look for start of thinking tag
+                const thinkStart = remainingChunk.indexOf('<think>');
+                if (thinkStart !== -1) {
+                    // Add content before thinking tag to response
+                    if (thinkStart > 0) {
+                        this.responseBuffer += remainingChunk.substring(0, thinkStart);
+                        this.renderMarkdownResponse(this.responseBuffer);
+                    }
+                    
+                    // Enter thinking mode
+                    this.isInThinking = true;
+                    this.hasThinking = true;
+                    this.showThinkingIndicator();
+                    
+                    // Continue with content after the tag
+                    remainingChunk = remainingChunk.substring(thinkStart + 7); // 7 = '<think>'.length
+                } else {
+                    // No thinking tag, add to response buffer
+                    this.responseBuffer += remainingChunk;
+                    this.renderMarkdownResponse(this.responseBuffer);
+                    break;
+                }
+            } else {
+                // We're in thinking mode, look for end tag
+                const thinkEnd = remainingChunk.indexOf('</think>');
+                if (thinkEnd !== -1) {
+                    // Add content before end tag to thinking buffer
+                    this.thinkingBuffer += remainingChunk.substring(0, thinkEnd);
+                    
+                    // Exit thinking mode
+                    this.isInThinking = false;
+                    this.hideThinkingIndicator();
+                    
+                    // Continue with content after the tag
+                    remainingChunk = remainingChunk.substring(thinkEnd + 8); // 8 = '</think>'.length
+                } else {
+                    // Still in thinking, add to thinking buffer
+                    this.thinkingBuffer += remainingChunk;
+                    break;
+                }
+            }
+        }
+        
+        this.scrollToBottom();
+    }
+    
+    showThinkingIndicator() {
+        if (this.currentResponse && !this.currentResponse.querySelector('.thinking-indicator-live')) {
+            const indicator = document.createElement('div');
+            indicator.className = 'thinking-indicator-live';
+            indicator.innerHTML = '🤔 <em>Thinking...</em>';
+            indicator.style.cssText = 'color: #666; font-style: italic; margin-bottom: 10px;';
+            this.currentResponse.appendChild(indicator);
+        }
+    }
+    
+    hideThinkingIndicator() {
+        if (this.currentResponse) {
+            const indicator = this.currentResponse.querySelector('.thinking-indicator-live');
+            if (indicator) {
+                indicator.remove();
+            }
+        }
+    }
+    
+    renderFinalResponse() {
+        if (this.hasThinking && this.thinkingBuffer) {
+            // Create thinking + response structure
+            this.currentResponse.classList.add('has-thinking');
+            
+            const thinkingSection = this.createThinkingSection(this.thinkingBuffer);
+            const responseSection = this.createResponseSection(this.responseBuffer);
+            
+            this.currentResponse.innerHTML = '';
+            this.currentResponse.appendChild(thinkingSection);
+            this.currentResponse.appendChild(responseSection);
+        } else {
+            // No thinking content, just render the response
+            this.renderMarkdownResponse(this.responseBuffer);
+        }
+    }
+    
+    resetStreamingState() {
+        this.currentResponse = null;
+        this.responseBuffer = '';
+        this.thinkingBuffer = '';
+        this.isInThinking = false;
+        this.hasThinking = false;
+        this.sendButton.disabled = false;
+        this.messageInput.focus();
     }
     
     renderMarkdownResponse(content) {
@@ -129,6 +225,121 @@ class ChatClient {
         }
     }
     
+    renderResponseWithThinking(content) {
+        if (!this.currentResponse) return;
+        
+        // Parse thinking content from response
+        const { thinking, response } = this.parseThinkingContent(content);
+        
+        console.log('Thinking parsed:', thinking ? 'YES' : 'NO');
+        
+        if (thinking) {
+            // Create structure for thinking + response
+            this.currentResponse.classList.add('has-thinking');
+            
+            const thinkingSection = this.createThinkingSection(thinking);
+            const responseSection = this.createResponseSection(response);
+            
+            this.currentResponse.innerHTML = '';
+            this.currentResponse.appendChild(thinkingSection);
+            this.currentResponse.appendChild(responseSection);
+        } else {
+            // No thinking content, render normally
+            this.renderMarkdownResponse(content);
+        }
+    }
+    
+    parseThinkingContent(content) {
+        // Handle null/undefined content
+        if (!content) {
+            console.log('parseThinkingContent: content is null/undefined');
+            return { thinking: null, response: '' };
+        }
+        
+        
+        // Look for thinking content in XML-style tags
+        const patterns = [
+            /<thinking>(.*?)<\/thinking>/gs,
+            /<think>(.*?)<\/think>/gs,
+            /\[THINKING\](.*?)\[\/THINKING\]/gs,
+            /\[thinking\](.*?)\[\/thinking\]/gs
+        ];
+        
+        for (let i = 0; i < patterns.length; i++) {
+            const pattern = patterns[i];
+            const match = content.match(pattern);
+            if (match && match[1] !== undefined) {
+                const thinking = match[1].trim();
+                const response = content.replace(match[0], '').trim();
+                console.log('Successfully parsed thinking content with pattern', i + 1);
+                console.log('Thinking length:', thinking.length);
+                console.log('Response length:', response.length);
+                return { thinking, response };
+            }
+        }
+        
+        return { thinking: null, response: content };
+    }
+    
+    createThinkingSection(thinking) {
+        const section = document.createElement('div');
+        section.className = 'thinking-section';
+        
+        const header = document.createElement('div');
+        header.className = 'thinking-header';
+        header.innerHTML = `
+            <span class="thinking-toggle">▶</span>
+            <span>🤔 Model's thinking process</span>
+        `;
+        
+        const content = document.createElement('div');
+        content.className = 'thinking-content';
+        content.textContent = thinking;
+        
+        // Add click handler for toggle
+        header.addEventListener('click', () => {
+            const toggle = header.querySelector('.thinking-toggle');
+            const isExpanded = content.classList.contains('expanded');
+            
+            if (isExpanded) {
+                content.classList.remove('expanded');
+                toggle.classList.remove('expanded');
+                toggle.textContent = '▶';
+            } else {
+                content.classList.add('expanded');
+                toggle.classList.add('expanded');
+                toggle.textContent = '▼';
+            }
+        });
+        
+        section.appendChild(header);
+        section.appendChild(content);
+        
+        return section;
+    }
+    
+    createResponseSection(response) {
+        const section = document.createElement('div');
+        section.className = 'response-content';
+        
+        try {
+            // Convert markdown to HTML
+            const rawHtml = marked.parse(response);
+            
+            // Sanitize the HTML to prevent XSS
+            const cleanHtml = DOMPurify.sanitize(rawHtml);
+            
+            // Set the sanitized HTML
+            section.innerHTML = cleanHtml;
+        } catch (error) {
+            console.error('Error rendering markdown:', error);
+            // Fallback to plain text
+            section.textContent = response;
+        }
+        
+        return section;
+    }
+    
     addMessage(content, sender) {
         const messageDiv = document.createElement('div');
         messageDiv.className = `message ${sender}-message`;
@@ -137,11 +348,23 @@ class ChatClient {
             // User messages are plain text
             messageDiv.textContent = content;
         } else {
-            // Assistant messages support markdown
+            // Assistant messages support markdown and thinking
             if (content === 'Thinking...') {
                 messageDiv.textContent = content;
             } else {
-                this.renderMarkdownInElement(messageDiv, content);
+                const { thinking, response } = this.parseThinkingContent(content);
+                
+                if (thinking) {
+                    messageDiv.classList.add('has-thinking');
+                    
+                    const thinkingSection = this.createThinkingSection(thinking);
+                    const responseSection = this.createResponseSection(response);
+                    
+                    messageDiv.appendChild(thinkingSection);
+                    messageDiv.appendChild(responseSection);
+                } else {
+                    this.renderMarkdownInElement(messageDiv, content);
+                }
             }
         }
         
