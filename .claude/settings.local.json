@@ -10,7 +10,8 @@
       "Bash(curl:*)",
       "WebFetch(domain:docs.lmstudio.ai)",
       "WebFetch(domain:lmstudio.ai)",
-      "WebFetch(domain:docs.trychroma.com)"
+      "WebFetch(domain:docs.trychroma.com)",
+      "mcp__synapse__search_by_source"
     ],
     "deny": []
   }

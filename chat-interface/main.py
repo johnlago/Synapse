@@ -83,11 +83,11 @@ class ToolCaller:
     def __init__(self):
         self.http_client = httpx.AsyncClient()
     
-    async def search_documents(self, query: str, limit: int = 5) -> str:
-        """Search documents via processor API"""
+    async def search_documents(self, query: str, limit: int = 2) -> str:
+        """Search documents via processor API with simple formatting for local LLMs"""
         try:
             url = f"http://{PROCESSOR_HOST}/search"
-            payload = {"query": query, "limit": limit}
+            payload = {"query": query, "limit": min(limit, 2)}  # Max 2 results for local LLMs
             
             response = await self.http_client.post(url, json=payload)
             response.raise_for_status()
@@ -99,20 +99,20 @@ class ToolCaller:
             
             results = data.get("results", [])
             if not results:
-                return "No relevant documents found for your query."
+                return "No results found."
             
-            # Format results for chat
-            formatted = f"Found {len(results)} relevant documents:\n\n"
+            # Simple format for local LLMs
+            formatted_parts = []
             for i, result in enumerate(results, 1):
-                formatted += f"**Result {i}** (similarity: {result.get('similarity', 0):.2f})\n"
-                formatted += f"Source: {result.get('source', 'Unknown')}\n"
-                formatted += f"Content: {result.get('content', '')[:400]}...\n\n"
+                source = result.get('source', 'Unknown')
+                content = result.get('content', '')[:120] + "..." if len(result.get('content', '')) > 120 else result.get('content', '')
+                formatted_parts.append(f"{i}. {source}: {content}")
             
-            return formatted
+            return "\n".join(formatted_parts)
             
         except Exception as e:
             logger.error(f"Error searching documents: {e}")
-            return f"Error searching documents: {str(e)}"
+            return f"Error: {str(e)}"
     
     async def get_document_status(self) -> str:
         """Get status from processor API"""
@@ -165,7 +165,7 @@ async def chat_with_ollama(message: str) -> AsyncGenerator[str, None]:
             if should_search and not any(greeting in message.lower() for greeting in ['hi', 'hello', 'hey', 'thanks', 'thank you']):
                 # Try to search documents first
                 try:
-                    search_result = await tool_caller.search_documents(message, limit=3)
+                    search_result = await tool_caller.search_documents(message, limit=2)
                     
                     # Create context-aware prompt with better formatting
                     base_prompt = f"""You are helping a user search through their personal notes. Based on their question: "{message}"

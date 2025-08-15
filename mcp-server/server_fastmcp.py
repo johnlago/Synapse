@@ -1092,6 +1092,54 @@ async def clear_search_history() -> str:
     search_history.clear()
     return f"Cleared {count} search history entries."
 
+@mcp.tool()
+async def simple_search(query: str, limit: int = 2) -> str:
+    """Simple search optimized for local LLMs with concise responses
+    
+    Args:
+        query: The search query
+        limit: Maximum results (default: 2, max: 3)
+    
+    Returns:
+        Brief search results in simple format
+    """
+    await init_clients()
+    
+    # Limit results for local LLMs
+    limit = min(limit, 3)
+    
+    try:
+        query_embedding = await get_embeddings(query)
+        
+        results = collection.query(
+            query_embeddings=[query_embedding],
+            n_results=limit,
+            include=["documents", "metadatas", "distances"]
+        )
+        
+        if not results['documents'][0]:
+            return "No results found."
+        
+        # Format simple results
+        output = []
+        for i, (doc, metadata, distance) in enumerate(zip(
+            results['documents'][0],
+            results['metadatas'][0], 
+            results['distances'][0]
+        )):
+            similarity = max(0, 1 - distance)
+            # Keep snippets very short for local LLMs
+            snippet = doc[:120] + "..." if len(doc) > 120 else doc
+            file_name = metadata.get('file_name', 'Unknown')
+            
+            output.append(f"{i+1}. {file_name}: {snippet}")
+        
+        return "\n".join(output)
+        
+    except Exception as e:
+        logger.error(f"Search error: {e}")
+        return f"Error: {e}"
+
 if __name__ == "__main__":
     logger.info("Starting Local RAG MCP Server with FastMCP")
     logger.info(f"Configuration:")
