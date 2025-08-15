@@ -246,4 +246,5 @@ Adjust these according to your preference
 
 ## File Watching
 
-The system automatically watches the `./documents` folder and processes new/modified files in real-time.
+The system automatically watches the documents (set by the .env file) folder and processes new/modified files in real-time.
+
