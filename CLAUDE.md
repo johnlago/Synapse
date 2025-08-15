@@ -115,7 +115,7 @@ The system includes a web-based chat interface available at `http://localhost:80
 ### Claude Code
 Add this system as an MCP server to Claude Code:
 ```bash
-claude mcp add local-rag -- docker exec -i local-rag-db-mcp-server-1 python /app/server_fastmcp.py
+claude mcp add synapse -- docker exec -i synapse-mcp-server-1 python /app/server_fastmcp.py
 ```
 
 ### LM Studio
@@ -127,9 +127,9 @@ claude mcp add local-rag -- docker exec -i local-rag-db-mcp-server-1 python /app
 ```json
 {
   "mcpServers": {
-    "local-rag": {
+    "synapse": {
       "command": "docker",
-      "args": ["exec", "-i", "local-rag-db-mcp-server-1", "python", "/app/server_fastmcp.py"],
+      "args": ["exec", "-i", "synapse-mcp-server-1", "python", "/app/server_fastmcp.py"],
       "env": {}
     }
   }
@@ -139,8 +139,8 @@ claude mcp add local-rag -- docker exec -i local-rag-db-mcp-server-1 python /app
 #### Method 2: In-App Editor (if available)
 1. Open LM Studio
 2. Navigate to the **Program** tab
-3. Use the MCP server editor to add the local-rag server
-4. Set command to: `docker exec -i local-rag-db-mcp-server-1 python /app/server_fastmcp.py`
+3. Use the MCP server editor to add the synapse server
+4. Set command to: `docker exec -i synapse-mcp-server-1 python /app/server_fastmcp.py`
 
 **Security Note**: MCP integration allows the AI to access your documents remotely. Only use trusted MCP servers.
 

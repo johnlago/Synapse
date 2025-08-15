@@ -75,7 +75,7 @@ sudo ss -tlnp | grep ollama
 #### Check Docker Host Connectivity
 ```bash
 # Test connectivity from container to host
-docker exec -it local-rag-db-processor-1 curl http://host.docker.internal:11434/api/tags
+docker exec -it synapse-processor-1 curl http://host.docker.internal:11434/api/tags
 ```
 
 #### Firewall Considerations

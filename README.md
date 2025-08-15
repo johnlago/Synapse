@@ -62,16 +62,16 @@ make status
 ### Setup MCP Integration
 
 1. **Open LM Studio** and navigate to the **Program** tab
-2. **Edit mcp.json** and add the local-rag server:
+2. **Edit mcp.json** and add the synapse server:
 
 ```json
 {
   "mcpServers": {
-    "local-rag": {
+    "synapse": {
       "command": "docker",
       "args": [
         "exec", "-i", 
-        "local-rag-db-mcp-server-1", 
+        "synapse-mcp-server-1", 
         "python", "/app/server_fastmcp.py"
       ],
       "env": {}
@@ -95,7 +95,7 @@ make status
 ### Setup
 ```bash
 # Add the MCP server to Claude Code
-claude mcp add local-rag -- docker exec -i local-rag-db-mcp-server-1 python /app/server_fastmcp.py
+claude mcp add synapse -- docker exec -i synapse-mcp-server-1 python /app/server_fastmcp.py
 ```
 
 ### Usage

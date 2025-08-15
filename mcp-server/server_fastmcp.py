@@ -19,7 +19,7 @@ OLLAMA_HOST = os.getenv("OLLAMA_HOST", "localhost:11434")
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "mxbai-embed-large")
 
 # Initialize FastMCP server
-mcp = FastMCP("local-rag")
+mcp = FastMCP("synapse")
 
 # Global clients
 chroma_client = None
