@@ -190,6 +190,28 @@ claude mcp add local-rag -- docker exec -i local-rag-db-mcp-server-1 python /app
 
 Update the path in the second method to match your actual project location.
 
+## Using LM Studio
+
+### MCP config
+
+```
+{
+  "mcpServers": {
+    "local-rag": {
+      "command": "docker",
+      "args": [
+        "exec",
+        "-i",
+        "local-rag-db-mcp-server-1",
+        "python",
+        "/app/server_fastmcp.py"
+      ],
+      "env": {}
+    }
+  }
+}
+```
+
 ## Services & Ports
 
 - **ChromaDB**: Port 8000 - Vector database

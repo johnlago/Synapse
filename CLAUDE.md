@@ -83,6 +83,17 @@ curl -X POST http://localhost:8001/search -H "Content-Type: application/json" -d
 open http://localhost:8003
 ```
 
+## UI Options
+
+### Built-in Chat Interface
+The system includes a web-based chat interface available at `http://localhost:8003` with streaming responses and WebSocket support.
+
+### LM Studio Integration
+**LM Studio** provides a more sophisticated UI for interacting with local language models and can be integrated with this RAG system in two ways:
+
+1. **MCP Integration** (Recommended): Adds document search capabilities directly to LM Studio
+2. **API Integration**: Use LM Studio's OpenAI-compatible API to build custom RAG workflows
+
 ## Key Configuration
 
 ### Environment Variables (via .env file)
@@ -99,14 +110,67 @@ open http://localhost:8003
 - Text (.txt)
 - Word documents (.docx)
 
-## MCP Integration with Claude Code
+## MCP Integration
 
+### Claude Code
 Add this system as an MCP server to Claude Code:
 ```bash
 claude mcp add local-rag -- docker exec -i local-rag-db-mcp-server-1 python /app/server_fastmcp.py
 ```
 
-**Security Note**: MCP integration allows Claude to access your documents remotely.
+### LM Studio
+**Prerequisites**: LM Studio version 0.3.17 or later
+
+#### Method 1: Manual mcp.json Configuration
+1. Open LM Studio and navigate to the **Program** tab
+2. Edit the `mcp.json` file and add:
+```json
+{
+  "mcpServers": {
+    "local-rag": {
+      "command": "docker",
+      "args": ["exec", "-i", "local-rag-db-mcp-server-1", "python", "/app/server_fastmcp.py"],
+      "env": {}
+    }
+  }
+}
+```
+
+#### Method 2: In-App Editor (if available)
+1. Open LM Studio
+2. Navigate to the **Program** tab
+3. Use the MCP server editor to add the local-rag server
+4. Set command to: `docker exec -i local-rag-db-mcp-server-1 python /app/server_fastmcp.py`
+
+**Security Note**: MCP integration allows the AI to access your documents remotely. Only use trusted MCP servers.
+
+## Alternative Integration Methods
+
+### OpenAI-Compatible API
+For custom integrations, you can use LM Studio's OpenAI-compatible API alongside the RAG system's search API:
+
+```python
+# Example: Custom RAG workflow with LM Studio API
+import requests
+import openai
+
+# Search documents
+search_response = requests.post(
+    "http://localhost:8001/search",
+    json={"query": "your question", "limit": 3}
+)
+context = search_response.json()
+
+# Query LM Studio (configure endpoint in LM Studio)
+client = openai.OpenAI(base_url="http://localhost:1234/v1", api_key="not-needed")
+response = client.chat.completions.create(
+    model="local-model",
+    messages=[
+        {"role": "system", "content": f"Context: {context}"},
+        {"role": "user", "content": "your question"}
+    ]
+)
+```
 
 ## File Structure
 
