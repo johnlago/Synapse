@@ -2,6 +2,10 @@
 
 A containerized RAG (Retrieval-Augmented Generation) system that indexes your local documents and makes them searchable through Claude Code and LM Studio via MCP (Model Context Protocol).
 
+
+> Note: This is primarily tested on Mac and Linux (check LINUX.md)
+> No clue about Windows.
+
 **Key Features:**
 - 🔒 **Fully Local**: Uses Ollama for embeddings and LLM processing
 - 🔌 **MCP Integration**: Works seamlessly with Claude Code and LM Studio
