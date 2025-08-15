@@ -1,4 +1,4 @@
-# Local RAG System with MCP Integration
+# Synapse: Local RAG System with MCP Integration
 
 A containerized RAG (Retrieval-Augmented Generation) system that indexes your local documents and makes them searchable through Claude Code and LM Studio via MCP (Model Context Protocol).
 
