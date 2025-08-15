@@ -2,6 +2,7 @@
 import os
 import logging
 import re
+import json
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
 from mcp.server.fastmcp import FastMCP
@@ -23,6 +24,92 @@ mcp = FastMCP("local-rag")
 # Global clients
 chroma_client = None
 collection = None
+
+# Search history storage (in-memory for now)
+search_history = []
+MAX_HISTORY_SIZE = 50
+
+def highlight_text(text: str, query_terms: List[str], max_length: int = 500) -> str:
+    """Highlight query terms in text and return snippet"""
+    if not query_terms:
+        return text[:max_length] + ('...' if len(text) > max_length else '')
+    
+    # Convert to lowercase for matching
+    text_lower = text.lower()
+    highlighted_text = text
+    
+    # Find best snippet containing query terms
+    best_start = 0
+    best_score = 0
+    
+    # Look for snippet with most query terms
+    for i in range(0, len(text) - max_length + 1, 50):
+        snippet = text_lower[i:i + max_length]
+        score = sum(1 for term in query_terms if term.lower() in snippet)
+        if score > best_score:
+            best_score = score
+            best_start = i
+    
+    # Extract best snippet
+    snippet = text[best_start:best_start + max_length]
+    
+    # Highlight terms (simple markdown bold)
+    for term in query_terms:
+        if len(term) > 2:  # Only highlight meaningful terms
+            # Case-insensitive replacement
+            pattern = re.compile(re.escape(term), re.IGNORECASE)
+            snippet = pattern.sub(f"**{term}**", snippet)
+    
+    return snippet + ('...' if len(text) > max_length else '')
+
+def add_to_search_history(query: str, result_count: int):
+    """Add search query to history"""
+    global search_history
+    
+    # Avoid duplicates
+    search_history = [item for item in search_history if item['query'] != query]
+    
+    # Add new entry
+    search_history.insert(0, {
+        'query': query,
+        'timestamp': datetime.now().isoformat(),
+        'result_count': result_count
+    })
+    
+    # Limit history size
+    if len(search_history) > MAX_HISTORY_SIZE:
+        search_history = search_history[:MAX_HISTORY_SIZE]
+
+def extract_keywords_from_documents() -> List[str]:
+    """Extract common keywords from documents for auto-suggest"""
+    try:
+        # Get a sample of documents
+        results = collection.get(limit=100, include=["documents", "metadatas"])
+        
+        if not results['documents']:
+            return []
+        
+        # Extract keywords from documents
+        word_freq = {}
+        for doc in results['documents']:
+            # Simple keyword extraction
+            words = re.findall(r'\b[a-zA-Z]{3,}\b', doc.lower())
+            for word in words:
+                word_freq[word] = word_freq.get(word, 0) + 1
+        
+        # Return most common words (excluding common stopwords)
+        stopwords = {'the', 'and', 'for', 'are', 'but', 'not', 'you', 'all', 'can', 'had', 'her', 'was', 'one', 'our', 'out', 'day', 'get', 'has', 'him', 'his', 'how', 'its', 'may', 'new', 'now', 'old', 'see', 'two', 'who', 'boy', 'did', 'she', 'use', 'way', 'with'}
+        
+        filtered_words = [(word, freq) for word, freq in word_freq.items() 
+                         if word not in stopwords and freq > 2]
+        
+        # Sort by frequency and return top keywords
+        sorted_words = sorted(filtered_words, key=lambda x: x[1], reverse=True)
+        return [word for word, freq in sorted_words[:50]]
+        
+    except Exception as e:
+        logger.error(f"Error extracting keywords: {e}")
+        return []
 
 async def init_clients():
     """Initialize Chroma client and collection"""
@@ -86,8 +173,10 @@ async def search_documents(
         if not results['documents'][0]:
             return "No documents found matching your query."
         
-        # Format results
+        # Format results with highlighting
         formatted_results = []
+        query_terms = query.split()
+        
         for i, (doc, metadata, distance) in enumerate(zip(
             results['documents'][0],
             results['metadatas'][0], 
@@ -96,14 +185,20 @@ async def search_documents(
             # Convert cosine distance to similarity
             similarity = max(0, 1 - distance)
             if similarity >= min_similarity:
+                # Highlight query terms in content
+                highlighted_content = highlight_text(doc, query_terms)
+                
                 formatted_results.append(
                     f"**Result {i+1}** (similarity: {similarity:.3f})\n"
                     f"**Source:** {metadata.get('file_name', 'Unknown')}\n"
-                    f"**Content:** {doc[:500]}{'...' if len(doc) > 500 else ''}\n"
+                    f"**Content:** {highlighted_content}\n"
                 )
         
         if not formatted_results:
             return f"No documents found with similarity >= {min_similarity}"
+        
+        # Add to search history
+        add_to_search_history(query, len(formatted_results))
         
         return f"Found {len(formatted_results)} relevant documents:\n\n" + "\n---\n".join(formatted_results)
         
@@ -799,6 +894,203 @@ async def boolean_search(
     except Exception as e:
         logger.error(f"Error in boolean search: {e}")
         return f"Error in boolean search: {e}"
+
+@mcp.tool()
+async def get_search_history(limit: int = 10) -> str:
+    """Get recent search history
+    
+    Args:
+        limit: Number of recent searches to return (default: 10)
+    
+    Returns:
+        Formatted list of recent search queries
+    """
+    try:
+        if not search_history:
+            return "No search history available."
+        
+        recent_searches = search_history[:limit]
+        
+        formatted_history = []
+        for i, entry in enumerate(recent_searches, 1):
+            timestamp = datetime.fromisoformat(entry['timestamp']).strftime('%Y-%m-%d %H:%M')
+            formatted_history.append(
+                f"{i}. **{entry['query']}** ({entry['result_count']} results) - {timestamp}"
+            )
+        
+        return f"Recent search history ({len(recent_searches)} searches):\n\n" + "\n".join(formatted_history)
+        
+    except Exception as e:
+        logger.error(f"Error getting search history: {e}")
+        return f"Error getting search history: {e}"
+
+@mcp.tool()
+async def get_search_suggestions(
+    partial_query: str = "",
+    limit: int = 10
+) -> str:
+    """Get search suggestions based on document content and history
+    
+    Args:
+        partial_query: Partial search query to get suggestions for
+        limit: Number of suggestions to return (default: 10)
+    
+    Returns:
+        List of suggested search terms
+    """
+    await init_clients()
+    
+    try:
+        suggestions = []
+        
+        # Get suggestions from search history
+        if search_history:
+            history_suggestions = []
+            for entry in search_history[:20]:  # Check recent searches
+                query = entry['query']
+                if not partial_query or partial_query.lower() in query.lower():
+                    history_suggestions.append(f"{query} (from history)")
+            suggestions.extend(history_suggestions[:limit//2])
+        
+        # Get suggestions from document keywords
+        try:
+            keywords = extract_keywords_from_documents()
+            keyword_suggestions = []
+            
+            if partial_query:
+                # Filter keywords that match partial query
+                matching_keywords = [kw for kw in keywords 
+                                   if partial_query.lower() in kw.lower()]
+                keyword_suggestions.extend(matching_keywords[:limit//2])
+            else:
+                # Return popular keywords
+                keyword_suggestions.extend(keywords[:limit//2])
+            
+            suggestions.extend([f"{kw} (keyword)" for kw in keyword_suggestions])
+        except:
+            pass  # Continue without keywords if extraction fails
+        
+        # Add common technical search patterns
+        if partial_query:
+            common_patterns = [
+                f"{partial_query} configuration",
+                f"{partial_query} setup",
+                f"{partial_query} documentation",
+                f"{partial_query} tutorial",
+                f"{partial_query} error",
+                f"{partial_query} example"
+            ]
+            suggestions.extend([f"{pattern} (pattern)" for pattern in common_patterns[:3]])
+        
+        if not suggestions:
+            return "No suggestions available. Try searching for: configuration, setup, documentation, api, error, tutorial"
+        
+        # Remove duplicates and limit
+        unique_suggestions = []
+        seen = set()
+        for suggestion in suggestions:
+            base_suggestion = suggestion.split(' (')[0]  # Remove type annotation for comparison
+            if base_suggestion not in seen:
+                seen.add(base_suggestion)
+                unique_suggestions.append(suggestion)
+                if len(unique_suggestions) >= limit:
+                    break
+        
+        query_text = f" for '{partial_query}'" if partial_query else ""
+        return f"Search suggestions{query_text}:\n\n" + "\n".join([f"• {s}" for s in unique_suggestions])
+        
+    except Exception as e:
+        logger.error(f"Error getting suggestions: {e}")
+        return f"Error getting suggestions: {e}"
+
+@mcp.tool()
+async def search_with_highlights(
+    query: str,
+    limit: int = 5,
+    min_similarity: float = 0.001,
+    snippet_length: int = 300
+) -> str:
+    """Enhanced search with detailed highlighting and snippets
+    
+    Args:
+        query: The search query
+        limit: Maximum number of results (default: 5)
+        min_similarity: Minimum similarity score (default: 0.001)
+        snippet_length: Length of content snippets (default: 300)
+    
+    Returns:
+        Formatted search results with enhanced highlighting
+    """
+    await init_clients()
+    
+    try:
+        # Get query embedding
+        query_embedding = await get_embeddings(query)
+        
+        # Search in Chroma
+        results = collection.query(
+            query_embeddings=[query_embedding],
+            n_results=limit,
+            include=["documents", "metadatas", "distances"]
+        )
+        
+        if not results['documents'][0]:
+            return "No documents found matching your query."
+        
+        # Format results with enhanced highlighting
+        formatted_results = []
+        query_terms = query.split()
+        
+        for i, (doc, metadata, distance) in enumerate(zip(
+            results['documents'][0],
+            results['metadatas'][0], 
+            results['distances'][0]
+        )):
+            # Convert cosine distance to similarity
+            similarity = max(0, 1 - distance)
+            if similarity >= min_similarity:
+                # Enhanced highlighting with custom snippet length
+                highlighted_content = highlight_text(doc, query_terms, snippet_length)
+                
+                # Additional metadata
+                processed_at = metadata.get('processed_at', 0)
+                processed_date = datetime.fromtimestamp(processed_at).strftime('%Y-%m-%d %H:%M') if processed_at else 'Unknown'
+                file_type = metadata.get('file_name', '').split('.')[-1].upper() if '.' in metadata.get('file_name', '') else 'Unknown'
+                chunk_id = metadata.get('chunk_id', 'N/A')
+                
+                # Count matching terms
+                matching_terms = [term for term in query_terms if term.lower() in doc.lower()]
+                
+                formatted_results.append(
+                    f"**Result {i+1}** (similarity: {similarity:.3f}) [{len(matching_terms)}/{len(query_terms)} terms matched]\n"
+                    f"**Source:** {metadata.get('file_name', 'Unknown')} ({file_type}) - Chunk {chunk_id}\n"
+                    f"**Processed:** {processed_date}\n"
+                    f"**Highlighted Content:**\n{highlighted_content}\n"
+                )
+        
+        if not formatted_results:
+            return f"No documents found with similarity >= {min_similarity}"
+        
+        # Add to search history
+        add_to_search_history(query, len(formatted_results))
+        
+        return f"Enhanced search for '{query}' found {len(formatted_results)} documents:\n\n" + "\n---\n".join(formatted_results)
+        
+    except Exception as e:
+        logger.error(f"Enhanced search error: {e}")
+        return f"Error in enhanced search: {e}"
+
+@mcp.tool()
+async def clear_search_history() -> str:
+    """Clear search history
+    
+    Returns:
+        Confirmation message
+    """
+    global search_history
+    count = len(search_history)
+    search_history.clear()
+    return f"Cleared {count} search history entries."
 
 if __name__ == "__main__":
     logger.info("Starting Local RAG MCP Server with FastMCP")
