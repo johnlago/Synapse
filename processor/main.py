@@ -77,7 +77,11 @@ class FileWatcher(FileSystemEventHandler):
             logger.error(f"Error scheduling processing for {file_path}: {e}")
         
     def on_created(self, event):
-        if not event.is_directory and event.src_path.endswith(('.md', '.pdf', '.txt', '.docx')):
+        if event.is_directory:
+            # When a directory is created, scan it for existing files
+            logger.info(f"Directory created: {event.src_path}, scanning for files...")
+            self._scan_directory(event.src_path)
+        elif event.src_path.endswith(('.md', '.pdf', '.txt', '.docx')):
             logger.info(f"File created: {event.src_path}")
             self._schedule_processing(event.src_path, "created")
         
@@ -85,6 +89,27 @@ class FileWatcher(FileSystemEventHandler):
         if not event.is_directory and event.src_path.endswith(('.md', '.pdf', '.txt', '.docx')):
             logger.info(f"File modified: {event.src_path}")
             self._schedule_processing(event.src_path, "modified")
+    
+    def on_moved(self, event):
+        """Handle file/directory moves (including renames)"""
+        if event.is_directory:
+            logger.info(f"Directory moved: {event.src_path} -> {event.dest_path}, scanning destination...")
+            self._scan_directory(event.dest_path)
+        elif event.dest_path.endswith(('.md', '.pdf', '.txt', '.docx')):
+            logger.info(f"File moved: {event.src_path} -> {event.dest_path}")
+            self._schedule_processing(event.dest_path, "moved")
+    
+    def _scan_directory(self, dir_path):
+        """Recursively scan directory for processable files"""
+        try:
+            for root, dirs, files in os.walk(dir_path):
+                for file in files:
+                    if file.endswith(('.md', '.pdf', '.txt', '.docx')):
+                        file_path = os.path.join(root, file)
+                        logger.info(f"Found file in new directory: {file_path}")
+                        self._schedule_processing(file_path, "directory_scan")
+        except Exception as e:
+            logger.error(f"Error scanning directory {dir_path}: {e}")
 
 def calculate_file_hash(file_path: str) -> str:
     """Calculate SHA256 hash of file content"""
