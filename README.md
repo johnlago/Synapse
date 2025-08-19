@@ -71,7 +71,7 @@ make status
       "command": "docker",
       "args": [
         "exec", "-i", 
-        "synapse-mcp-server-1", 
+        "synapse-main-mcp-server-1", 
         "python", "/app/server_fastmcp.py"
       ],
       "env": {}
